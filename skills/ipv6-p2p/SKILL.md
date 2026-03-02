@@ -20,7 +20,8 @@ Direct agent-to-agent messaging over IPv6. No servers — messages are signed wi
 
 - **Always call `p2p_add_peer` first** for any new IPv6 address before sending — this caches their public key (TOFU security).
 - Pass the user-provided name/alias to `p2p_add_peer` if given.
-- If `p2p_send_message` fails, report the error and suggest the peer verify their agent is running.
+- If `p2p_send_message` fails, call `yggdrasil_check()` to diagnose connectivity before reporting to the user.
+- If the user has never used P2P before, call `yggdrasil_check()` first to confirm their address is routable.
 - Never invent IPv6 addresses — always ask the user to provide one explicitly.
 - Valid address formats: `fd77:xxxx::x` (ULA/test) or `200:xxxx::x` (Yggdrasil mainnet).
 

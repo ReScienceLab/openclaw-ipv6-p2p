@@ -4,7 +4,7 @@
   "description": "Direct encrypted P2P communication between OpenClaw instances via Yggdrasil IPv6",
   "version": "0.1.0",
   "channels": ["ipv6-p2p"],
-  "skills": ["./skills/ipv6-p2p"],
+  "skills": ["./skills/ipv6-p2p", "./skills/yggdrasil"],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

@@ -28,6 +28,7 @@ let identity: Identity | null = null;
 let yggInfo: YggdrasilInfo | null = null;
 let dataDir: string = path.join(os.homedir(), ".openclaw", "ipv6-p2p");
 let peerPort: number = 8099;
+let _testMode: boolean = false;
 
 export default function register(api: any) {
   // ── 1. Background service ──────────────────────────────────────────────────
@@ -40,6 +41,7 @@ export default function register(api: any) {
       peerPort = cfg.peer_port ?? peerPort;
       const extraPeers: string[] = cfg.yggdrasil_peers ?? [];
       const testMode = cfg.test_mode ?? false;
+      _testMode = testMode;
 
       // Load or create Ed25519 identity
       identity = loadOrCreateIdentity(dataDir);
@@ -352,6 +354,65 @@ export default function register(api: any) {
         `Known peers: ${peers.length}`,
         `Unread inbox: ${inbox.length} messages`,
       ];
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    },
+  });
+
+  api.registerTool({
+    name: "yggdrasil_check",
+    description:
+      "Diagnose Yggdrasil installation and daemon status. " +
+      "Call this when: the user asks if P2P connectivity is working, asks how to get their address, " +
+      "p2p_send_message fails, or the user mentions they haven't installed Yggdrasil. " +
+      "Returns whether the binary is installed, whether the daemon is running, the current address " +
+      "and whether it is globally routable on the Yggdrasil network.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, never>) {
+      const binaryAvailable = isYggdrasilAvailable();
+      const daemonRunning = yggInfo !== null;
+
+      let addressType: string;
+      let routable: boolean;
+      let address: string;
+
+      if (daemonRunning && yggInfo) {
+        addressType = "yggdrasil (globally routable on the Yggdrasil network)";
+        routable = true;
+        address = yggInfo.address;
+      } else if (_testMode) {
+        addressType = "test_mode (reachable only on the local/Docker network)";
+        routable = false;
+        address = identity?.yggIpv6 ?? "unknown";
+      } else {
+        addressType = "derived_only (estimated — NOT routable without Yggdrasil)";
+        routable = false;
+        address = identity?.yggIpv6 ?? "unknown";
+      }
+
+      const lines = [
+        `Binary installed : ${binaryAvailable ? "Yes" : "No"}`,
+        `Daemon running   : ${daemonRunning ? `Yes (pid ${yggInfo?.pid})` : "No"}`,
+        `Address          : ${address}`,
+        `Address type     : ${addressType}`,
+        `Globally routable: ${routable ? "Yes" : "No"}`,
+      ];
+
+      if (!binaryAvailable) {
+        lines.push(
+          "",
+          "ACTION REQUIRED: Yggdrasil is not installed.",
+          "Without it, your P2P address is not reachable by peers on the internet.",
+          "Install instructions: see the yggdrasil skill (references/install.md).",
+          "After installing, restart the OpenClaw gateway — the plugin will start Yggdrasil automatically."
+        );
+      } else if (!daemonRunning) {
+        lines.push(
+          "",
+          "Yggdrasil is installed but the managed daemon is not running.",
+          "Try restarting the OpenClaw gateway. The plugin starts Yggdrasil automatically on boot."
+        );
+      }
+
       return { content: [{ type: "text", text: lines.join("\n") }] };
     },
   });
