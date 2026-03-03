@@ -18,7 +18,7 @@ import * as os from "os";
 import * as path from "path";
 import { loadOrCreateIdentity, getActualIpv6 } from "./identity";
 import { startYggdrasil, stopYggdrasil, isYggdrasilAvailable, detectExternalYggdrasil } from "./yggdrasil";
-import { initDb, listPeers, upsertPeer, removePeer, getPeer } from "./peer-db";
+import { initDb, listPeers, upsertPeer, removePeer, getPeer, flushDb } from "./peer-db";
 import { startPeerServer, stopPeerServer, getInbox } from "./peer-server";
 import { sendP2PMessage, pingPeer } from "./peer-client";
 import { bootstrapDiscovery, startDiscoveryLoop, stopDiscoveryLoop, DEFAULT_BOOTSTRAP_PEERS } from "./peer-discovery";
@@ -110,6 +110,7 @@ export default function register(api: any) {
         _startupTimer = null;
       }
       stopDiscoveryLoop();
+      flushDb();
       await stopPeerServer();
       stopYggdrasil();
     },

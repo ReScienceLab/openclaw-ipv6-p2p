@@ -12,6 +12,8 @@ interface PeerStore {
 
 let dbPath: string;
 let store: PeerStore = { peers: {} };
+let _saveTimer: ReturnType<typeof setTimeout> | null = null;
+const SAVE_DEBOUNCE_MS = 1000;
 
 function load(): void {
   if (fs.existsSync(dbPath)) {
@@ -23,8 +25,24 @@ function load(): void {
   }
 }
 
-function save(): void {
+function saveImmediate(): void {
+  if (_saveTimer) {
+    clearTimeout(_saveTimer);
+    _saveTimer = null;
+  }
   fs.writeFileSync(dbPath, JSON.stringify(store, null, 2));
+}
+
+function save(): void {
+  if (_saveTimer) return;
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null;
+    fs.writeFileSync(dbPath, JSON.stringify(store, null, 2));
+  }, SAVE_DEBOUNCE_MS);
+}
+
+export function flushDb(): void {
+  if (_saveTimer) saveImmediate();
 }
 
 export function initDb(dataDir: string): void {
@@ -45,7 +63,7 @@ export function upsertPeer(yggAddr: string, alias: string = ""): void {
   } else {
     store.peers[yggAddr] = { yggAddr, publicKey: "", alias, firstSeen: now, lastSeen: now, source: "manual" };
   }
-  save();
+  saveImmediate();
 }
 
 /**
@@ -87,7 +105,7 @@ export function getPeersForExchange(max: number = 20): DiscoveredPeerRecord[] {
 
 export function removePeer(yggAddr: string): void {
   delete store.peers[yggAddr];
-  save();
+  saveImmediate();
 }
 
 export function getPeer(yggAddr: string): PeerRecord | null {
@@ -109,7 +127,7 @@ export function toufuVerifyAndCache(yggAddr: string, publicKey: string): boolean
   if (!existing) {
     // Unknown peer — TOFU: accept and cache
     store.peers[yggAddr] = { yggAddr, publicKey, alias: "", firstSeen: now, lastSeen: now, source: "gossip" };
-    save();
+    saveImmediate();
     return true;
   }
 
@@ -117,7 +135,7 @@ export function toufuVerifyAndCache(yggAddr: string, publicKey: string): boolean
     // Known address (manually added) but no key yet — cache now
     existing.publicKey = publicKey;
     existing.lastSeen = now;
-    save();
+    saveImmediate();
     return true;
   }
 
