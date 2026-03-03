@@ -11,7 +11,7 @@
 import Fastify, { FastifyInstance } from "fastify";
 import { P2PMessage, PeerAnnouncement } from "./types";
 import { verifySignature } from "./identity";
-import { toufuVerifyAndCache, getPeersForExchange, upsertDiscoveredPeer } from "./peer-db";
+import { toufuVerifyAndCache, getPeersForExchange, upsertDiscoveredPeer, removePeer } from "./peer-db";
 
 export type MessageHandler = (msg: P2PMessage & { verified: boolean }) => void;
 
@@ -85,13 +85,14 @@ export async function startPeerServer(
       source: "gossip",
     });
 
-    // Absorb the peers they shared
+    // Absorb the peers they shared — preserve provenance timestamp
     for (const p of ann.peers ?? []) {
       if (p.yggAddr === ann.fromYgg) continue; // skip self-referential entries
       upsertDiscoveredPeer(p.yggAddr, p.publicKey, {
         alias: p.alias,
         discoveredVia: ann.fromYgg,
         source: "gossip",
+        lastSeen: p.lastSeen,
       });
     }
 
@@ -132,6 +133,13 @@ export async function startPeerServer(
       return reply.code(403).send({
         error: `Public key mismatch for ${msg.fromYgg} — possible key rotation, re-add peer`,
       });
+    }
+
+    // Signed tombstone: peer is gracefully leaving — remove from routing table
+    if (msg.event === "leave") {
+      removePeer(msg.fromYgg);
+      console.log(`[p2p] ← leave  from=${msg.fromYgg.slice(0, 20)}... — removed from peer table`);
+      return { ok: true };
     }
 
     const entry = { ...msg, verified: true, receivedAt: Date.now() };

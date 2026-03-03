@@ -69,17 +69,25 @@ export function upsertPeer(yggAddr: string, alias: string = ""): void {
 /**
  * Upsert a peer discovered via bootstrap or gossip.
  * Never overwrites a manually-added peer's alias or source.
+ *
+ * Provenance rule: if `lastSeen` is provided (gossip path), preserve the original
+ * timestamp — only advance if newer, never push to now based on indirect info.
+ * If `lastSeen` is omitted (direct contact path), update to now.
  */
 export function upsertDiscoveredPeer(
   yggAddr: string,
   publicKey: string,
-  opts: { alias?: string; discoveredVia?: string; source?: "bootstrap" | "gossip" } = {}
+  opts: { alias?: string; discoveredVia?: string; source?: "bootstrap" | "gossip"; lastSeen?: number } = {}
 ): void {
   const now = Date.now();
   const existing = store.peers[yggAddr];
   if (existing) {
     if (!existing.publicKey) existing.publicKey = publicKey;
-    existing.lastSeen = now;
+    if (opts.lastSeen !== undefined) {
+      existing.lastSeen = Math.max(existing.lastSeen, opts.lastSeen);
+    } else {
+      existing.lastSeen = now;
+    }
     if (!existing.discoveredVia) existing.discoveredVia = opts.discoveredVia;
   } else {
     store.peers[yggAddr] = {
@@ -87,7 +95,7 @@ export function upsertDiscoveredPeer(
       publicKey,
       alias: opts.alias ?? "",
       firstSeen: now,
-      lastSeen: now,
+      lastSeen: opts.lastSeen ?? now,
       source: opts.source ?? "gossip",
       discoveredVia: opts.discoveredVia,
     };
@@ -114,6 +122,30 @@ export function getPeer(yggAddr: string): PeerRecord | null {
 
 export function getPeerAddresses(): string[] {
   return Object.keys(store.peers);
+}
+
+/**
+ * Remove peers whose lastSeen is older than maxAgeMs.
+ * Skips manually-added peers and any address in protectedAddrs (e.g. bootstrap nodes).
+ * Returns the count of pruned peers.
+ */
+export function pruneStale(maxAgeMs: number, protectedAddrs: string[] = []): number {
+  const cutoff = Date.now() - maxAgeMs;
+  let pruned = 0;
+  for (const addr of Object.keys(store.peers)) {
+    const record = store.peers[addr];
+    if (record.source === "manual") continue;
+    if (protectedAddrs.includes(addr)) continue;
+    if (record.lastSeen < cutoff) {
+      delete store.peers[addr];
+      pruned++;
+    }
+  }
+  if (pruned > 0) {
+    console.log(`[p2p:db] Pruned ${pruned} stale peer(s)`);
+    saveImmediate();
+  }
+  return pruned;
 }
 
 /**

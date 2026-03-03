@@ -55,6 +55,22 @@ export async function sendP2PMessage(
 }
 
 /**
+ * Broadcast a signed "leave" tombstone to all known peers on graceful shutdown.
+ * Fire-and-forget with a short timeout — best effort.
+ */
+export async function broadcastLeave(
+  identity: Identity,
+  peers: Array<{ yggAddr: string }>,
+  port: number = 8099
+): Promise<void> {
+  if (peers.length === 0) return;
+  await Promise.allSettled(
+    peers.map((p) => sendP2PMessage(identity, p.yggAddr, "leave", "", port, 3_000))
+  );
+  console.log(`[p2p] Leave broadcast sent to ${peers.length} peer(s)`);
+}
+
+/**
  * Ping a peer — returns true if reachable within timeout.
  */
 export async function pingPeer(

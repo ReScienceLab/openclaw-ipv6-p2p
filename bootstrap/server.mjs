@@ -44,15 +44,26 @@ function savePeers() {
   }
 }
 
+/**
+ * Upsert a peer record.
+ * opts.lastSeen: if provided (gossip path), preserve provenance — only advance if newer.
+ * If omitted (direct announce path), update to now.
+ */
 function upsertPeer(yggAddr, publicKey, opts = {}) {
   const now = Date.now();
   const existing = peers.get(yggAddr);
+  let lastSeen;
+  if (opts.lastSeen !== undefined) {
+    lastSeen = Math.max(existing?.lastSeen ?? 0, opts.lastSeen);
+  } else {
+    lastSeen = now;
+  }
   peers.set(yggAddr, {
     yggAddr,
     publicKey,
     alias: opts.alias ?? existing?.alias ?? "",
     firstSeen: existing?.firstSeen ?? now,
-    lastSeen: now,
+    lastSeen,
     source: opts.source ?? "gossip",
     discoveredVia: opts.discoveredVia ?? existing?.discoveredVia,
   });
@@ -61,6 +72,20 @@ function upsertPeer(yggAddr, publicKey, opts = {}) {
     const sorted = [...peers.values()].sort((a, b) => a.lastSeen - b.lastSeen);
     peers.delete(sorted[0].yggAddr);
   }
+}
+
+function pruneStale(maxAgeMs, protectedAddrs = []) {
+  const cutoff = Date.now() - maxAgeMs;
+  let pruned = 0;
+  for (const [addr, record] of peers) {
+    if (protectedAddrs.includes(addr)) continue;
+    if (record.lastSeen < cutoff) {
+      peers.delete(addr);
+      pruned++;
+    }
+  }
+  if (pruned > 0) console.log(`[bootstrap] Pruned ${pruned} stale peer(s)`);
+  return pruned;
 }
 
 function getPeersForExchange(limit = 50) {
@@ -111,6 +136,9 @@ function isYggdrasilAddr(addr) {
 fs.mkdirSync(DATA_DIR, { recursive: true });
 loadPeers();
 setInterval(savePeers, PERSIST_INTERVAL_MS);
+// Prune peers not directly seen for 48h (protect sibling bootstrap nodes)
+const STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(48 * 60 * 60 * 1000));
+setInterval(() => pruneStale(STALE_TTL_MS, FALLBACK_SIBLINGS), 60 * 60 * 1000);
 
 const server = Fastify({ logger: false });
 
@@ -163,6 +191,7 @@ server.post("/peer/announce", async (req, reply) => {
       alias: p.alias,
       source: "gossip",
       discoveredVia: ann.fromYgg,
+      lastSeen: p.lastSeen,
     });
   }
 
@@ -269,6 +298,7 @@ async function syncWithSiblings() {
             alias: p.alias,
             source: "gossip",
             discoveredVia: addr,
+            lastSeen: p.lastSeen,
           });
         }
         ok++;

@@ -15,7 +15,7 @@ export interface YggdrasilInfo {
 export interface P2PMessage {
   fromYgg: string;       // sender's Yggdrasil address (must match TCP source IP)
   publicKey: string;     // sender's Ed25519 public key base64 (for TOFU)
-  event: "chat" | "ping" | "pong" | string;
+  event: "chat" | "ping" | "pong" | "leave" | string;
   content: string;
   timestamp: number;     // unix ms
   signature: string;     // Ed25519 sig over canonical JSON (all fields except signature)

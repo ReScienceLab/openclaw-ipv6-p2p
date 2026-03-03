@@ -14,7 +14,7 @@
 
 import { Identity, PeerAnnouncement } from "./types";
 import { signMessage } from "./identity";
-import { listPeers, upsertDiscoveredPeer, getPeersForExchange } from "./peer-db";
+import { listPeers, upsertDiscoveredPeer, getPeersForExchange, pruneStale } from "./peer-db";
 
 const BOOTSTRAP_JSON_URL =
   "https://resciencelab.github.io/DeClaw/bootstrap.json";
@@ -168,6 +168,7 @@ export async function bootstrapDiscovery(
         alias: p.alias,
         discoveredVia: addr,
         source: "bootstrap",
+        lastSeen: p.lastSeen,
       });
       fanoutCandidates.push(p.yggAddr);
       totalDiscovered++;
@@ -188,6 +189,7 @@ export async function bootstrapDiscovery(
             alias: p.alias,
             discoveredVia: addr,
             source: "gossip",
+            lastSeen: p.lastSeen,
           });
         }
       })
@@ -207,11 +209,18 @@ export async function bootstrapDiscovery(
 export function startDiscoveryLoop(
   identity: Identity,
   port: number = 8099,
-  intervalMs: number = 10 * 60 * 1000  // default: every 10 minutes
+  intervalMs: number = 10 * 60 * 1000,  // default: every 10 minutes
+  extraBootstrap: string[] = []
 ): void {
   if (_discoveryTimer) return;
 
+  // Protect both hardcoded and dynamically-configured bootstrap addresses from pruning
+  const protectedAddrs = [...new Set([...DEFAULT_BOOTSTRAP_PEERS, ...extraBootstrap])];
+
   const runGossip = async () => {
+    // Prune stale peers before gossiping (TTL = 3× interval)
+    pruneStale(3 * intervalMs, protectedAddrs);
+
     const peers = listPeers();
     if (peers.length === 0) return;
 
@@ -225,12 +234,20 @@ export function startDiscoveryLoop(
       sample.map(async (peer) => {
         const received = await announceToNode(identity, peer.yggAddr, port);
         if (!received) return;
+        // Direct contact succeeded — update lastSeen to now (omit lastSeen in opts)
+        upsertDiscoveredPeer(peer.yggAddr, peer.publicKey, {
+          alias: peer.alias,
+          discoveredVia: peer.yggAddr,
+          source: "gossip",
+        });
         for (const p of received) {
           if (p.yggAddr === identity.yggIpv6) continue;
+          // Indirect peers: preserve their original timestamp
           upsertDiscoveredPeer(p.yggAddr, p.publicKey, {
             alias: p.alias,
             discoveredVia: peer.yggAddr,
             source: "gossip",
+            lastSeen: p.lastSeen,
           });
           updated++;
         }
