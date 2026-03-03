@@ -58,20 +58,23 @@ let _discoveryTimer: NodeJS.Timeout | null = null;
 // ── Signed announcement builder ───────────────────────────────────────────────
 
 function buildAnnouncement(identity: Identity): Omit<PeerAnnouncement, "signature"> {
-  const myPeers = getPeersForExchange(MAX_SHARED_PEERS).map((p) => ({
-    yggAddr: p.yggAddr,
-    publicKey: p.publicKey,
-    alias: p.alias || undefined,
-    lastSeen: p.lastSeen,
-  }));
+  const myPeers = getPeersForExchange(MAX_SHARED_PEERS).map((p) => {
+    const entry: { yggAddr: string; publicKey: string; alias?: string; lastSeen: number } = {
+      yggAddr: p.yggAddr,
+      publicKey: p.publicKey,
+      lastSeen: p.lastSeen,
+    };
+    if (p.alias) entry.alias = p.alias;
+    return entry;
+  });
 
-  return {
+  const ann: Omit<PeerAnnouncement, "signature"> = {
     fromYgg: identity.yggIpv6,
     publicKey: identity.publicKey,
-    alias: undefined,
     timestamp: Date.now(),
     peers: myPeers,
   };
+  return ann;
 }
 
 // ── Core exchange ─────────────────────────────────────────────────────────────
