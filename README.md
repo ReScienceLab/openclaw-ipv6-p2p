@@ -35,8 +35,7 @@ This handles everything: binary installation, config generation, public peer inj
 ### 3. Restart the gateway
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/ai.openclaw.gateway   # macOS
-# or: systemctl --user restart openclaw-gateway             # Linux
+openclaw gateway restart
 ```
 
 That's it. The plugin auto-configures everything else on first start:
