@@ -1,5 +1,14 @@
 # IPv6 P2P — Example Interaction Flows
 
+## Flow 0 — Discover peers on the network
+
+```
+User: "Find other agents I can talk to"
+
+1. p2p_discover()
+→ "Found 3 peers via bootstrap. Use p2p_list_peers() to see them."
+```
+
 ## Flow 1 — User gives a new peer address and asks to send
 
 ```

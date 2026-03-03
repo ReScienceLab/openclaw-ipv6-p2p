@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "updated": "2026-03-03T11:30:00Z",
+  "bootstrap_nodes": [
+    {
+      "yggAddr": "200:697f:bda:1e8e:706a:6c5e:630b:51d",
+      "port": 8099,
+      "region": "us-east-2",
+      "provider": "aws",
+      "label": "bootstrap-us-east-2"
+    }
+  ]
+}

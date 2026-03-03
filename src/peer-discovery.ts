@@ -16,15 +16,33 @@ import { Identity, PeerAnnouncement } from "./types";
 import { signMessage } from "./identity";
 import { listPeers, upsertDiscoveredPeer, getPeersForExchange } from "./peer-db";
 
+const BOOTSTRAP_JSON_URL =
+  "https://resciencelab.github.io/DeClaw/bootstrap.json";
+
+/** Fetch bootstrap node list from the published GitHub Pages JSON. */
+export async function fetchRemoteBootstrapPeers(): Promise<string[]> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10_000);
+    const resp = await fetch(BOOTSTRAP_JSON_URL, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return [];
+    const data = (await resp.json()) as {
+      bootstrap_nodes?: { yggAddr: string; port?: number }[];
+    };
+    return (data.bootstrap_nodes ?? []).map((n) => n.yggAddr);
+  } catch {
+    console.warn("[p2p:discovery] Could not fetch remote bootstrap list — using hardcoded fallback");
+    return [];
+  }
+}
+
 /**
- * Default bootstrap nodes.
- * The network founder's Yggdrasil address — the first entry point for new nodes.
- * Users can add more via config `bootstrap_peers`.
- *
- * TODO: replace with actual Yggdrasil address once deployed.
+ * Hardcoded fallback used only when the remote list is unreachable.
+ * Update docs/bootstrap.json instead of editing this array.
  */
 export const DEFAULT_BOOTSTRAP_PEERS: string[] = [
-  "200:697f:bda:1e8e:706a:6c5e:630b:51d", // bootstrap node (us-east-2, t3.medium)
+  "200:697f:bda:1e8e:706a:6c5e:630b:51d",
 ];
 
 const EXCHANGE_TIMEOUT_MS = 30_000;
@@ -107,9 +125,9 @@ export async function bootstrapDiscovery(
   port: number = 8099,
   extraBootstrap: string[] = []
 ): Promise<number> {
+  const remotePeers = await fetchRemoteBootstrapPeers();
   const bootstrapAddrs = [
-    ...DEFAULT_BOOTSTRAP_PEERS,
-    ...extraBootstrap,
+    ...new Set([...remotePeers, ...DEFAULT_BOOTSTRAP_PEERS, ...extraBootstrap]),
   ].filter((a) => a && a !== identity.yggIpv6);
 
   if (bootstrapAddrs.length === 0) {

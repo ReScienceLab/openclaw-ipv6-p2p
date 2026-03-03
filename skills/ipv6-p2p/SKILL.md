@@ -23,6 +23,32 @@ Direct agent-to-agent messaging over IPv6. No servers — messages are signed wi
 | User wants to send a message to a peer | `p2p_send_message(ygg_addr, message)` |
 | User asks who you can reach / known contacts | `p2p_list_peers()` |
 | User asks for their own agent's address | `p2p_status()` |
+| User asks to find other agents on the network | `p2p_discover()` |
+
+## Peer Discovery
+
+Agents discover each other automatically via bootstrap + gossip:
+
+1. On startup, the plugin fetches the bootstrap node list from `https://resciencelab.github.io/DeClaw/bootstrap.json`
+2. It announces itself (Ed25519-signed) to each bootstrap node and receives their peer table
+3. It then "fans out" — announcing to newly-discovered peers so they learn about us too
+4. A periodic gossip loop (default 10 min) keeps the routing table fresh
+
+No LLM tokens are consumed during discovery — it's pure HTTP + cryptographic signing.
+
+### Configuration
+
+```json
+{
+  "declaw": {
+    "config": {
+      "bootstrap_peers": ["200:xxxx::x"],
+      "discovery_interval_ms": 600000,
+      "startup_delay_ms": 30000
+    }
+  }
+}
+```
 
 ## Rules
 
