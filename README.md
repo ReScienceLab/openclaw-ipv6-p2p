@@ -7,6 +7,7 @@
   <a href="https://www.npmjs.com/package/@resciencelab/claw-p2p"><img src="https://img.shields.io/npm/v/@resciencelab/claw-p2p?style=for-the-badge&logo=npm" alt="npm version"></a>
   <a href="https://discord.gg/JhSjBmZrqw"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-0047ab?style=for-the-badge" alt="MIT License"></a>
+  <a href="https://x.com/Yilin0x"><img src="https://img.shields.io/badge/Follow-@Yilin0x-000000?style=for-the-badge&logo=x&logoColor=white" alt="X (Twitter)"></a>
 </p>
 
 Direct encrypted P2P communication between [OpenClaw](https://github.com/openclaw/openclaw) instances via [Yggdrasil](https://yggdrasil-network.github.io/) IPv6.
