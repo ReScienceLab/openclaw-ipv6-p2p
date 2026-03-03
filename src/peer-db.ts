@@ -90,6 +90,8 @@ export function upsertDiscoveredPeer(
     }
     if (!existing.discoveredVia) existing.discoveredVia = opts.discoveredVia;
     if (opts.version) existing.version = opts.version;
+    // Refresh remote-declared name for non-manual peers
+    if (opts.alias && existing.source !== "manual") existing.alias = opts.alias;
   } else {
     store.peers[yggAddr] = {
       yggAddr,

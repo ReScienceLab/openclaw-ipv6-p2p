@@ -16,6 +16,7 @@ const PORT = parseInt(process.env.PEER_PORT ?? "8099");
 const DATA_DIR = process.env.DATA_DIR ?? "/data";
 const TEST_MODE = process.env.TEST_MODE === "true";
 const MAX_PEERS = 500;
+const AGENT_VERSION = process.env.AGENT_VERSION ?? "1.0.0";
 const PERSIST_INTERVAL_MS = 30_000;
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,7 @@ function upsertPeer(yggAddr, publicKey, opts = {}) {
     yggAddr,
     publicKey,
     alias: opts.alias ?? existing?.alias ?? "",
+    version: opts.version ?? existing?.version,
     firstSeen: existing?.firstSeen ?? now,
     lastSeen,
     source: opts.source ?? "gossip",
@@ -92,10 +94,11 @@ function getPeersForExchange(limit = 50) {
   return [...peers.values()]
     .sort((a, b) => b.lastSeen - a.lastSeen)
     .slice(0, limit)
-    .map(({ yggAddr, publicKey, alias, lastSeen }) => ({
+    .map(({ yggAddr, publicKey, alias, version, lastSeen }) => ({
       yggAddr,
       publicKey,
       alias,
+      version,
       lastSeen,
     }));
 }
@@ -181,6 +184,7 @@ server.post("/peer/announce", async (req, reply) => {
 
   upsertPeer(ann.fromYgg, ann.publicKey, {
     alias: ann.alias,
+    version: ann.version,
     source: "gossip",
     discoveredVia: ann.fromYgg,
   });
@@ -199,7 +203,12 @@ server.post("/peer/announce", async (req, reply) => {
     `[bootstrap] ↔ ${ann.fromYgg.slice(0, 22)}...  shared=${sharedPeers?.length ?? 0}  total=${peers.size}`
   );
 
-  return { ok: true, peers: getPeersForExchange(50) };
+  // Include self metadata so clients learn our name/version on first contact
+  const selfYgg = _selfYggAddr;
+  const self = selfYgg
+    ? { yggAddr: selfYgg, publicKey: selfPubB64, alias: _agentName, version: AGENT_VERSION }
+    : undefined;
+  return { ok: true, ...(self ? { self } : {}), peers: getPeersForExchange(50) };
 });
 
 await server.listen({ port: PORT, host: "::" });
@@ -228,6 +237,8 @@ if (fs.existsSync(idFile)) {
   }, null, 2));
 }
 const selfPubB64 = Buffer.from(selfKeypair.publicKey).toString("base64");
+let _selfYggAddr = null;
+let _agentName = process.env.AGENT_NAME ?? null;
 
 async function getSelfYggAddr() {
   try {
@@ -265,6 +276,9 @@ async function syncWithSiblings() {
     console.warn("[bootstrap:sync] Could not determine own Yggdrasil address — skipping");
     return;
   }
+  // Cache for /peer/announce response self metadata
+  _selfYggAddr = selfAddr;
+  if (!_agentName) _agentName = `ReScience Lab's bootstrap-${selfAddr.slice(0, 12)}`;
 
   const siblings = (await fetchSiblingAddrs()).filter((a) => a !== selfAddr);
   if (siblings.length === 0) return;
@@ -273,7 +287,8 @@ async function syncWithSiblings() {
   const signable = {
     fromYgg: selfAddr,
     publicKey: selfPubB64,
-    alias: `bootstrap-${selfAddr.slice(0, 12)}`,
+    alias: _agentName,
+    version: AGENT_VERSION,
     timestamp: Date.now(),
     peers: myPeers,
   };
@@ -292,10 +307,19 @@ async function syncWithSiblings() {
       });
       if (res.ok) {
         const body = await res.json();
+        if (body.self?.yggAddr && body.self?.publicKey) {
+          upsertPeer(body.self.yggAddr, body.self.publicKey, {
+            alias: body.self.alias,
+            version: body.self.version,
+            source: "gossip",
+            discoveredVia: body.self.yggAddr,
+          });
+        }
         for (const p of body.peers ?? []) {
           if (p.yggAddr === selfAddr) continue;
           upsertPeer(p.yggAddr, p.publicKey, {
             alias: p.alias,
+            version: p.version,
             source: "gossip",
             discoveredVia: addr,
             lastSeen: p.lastSeen,

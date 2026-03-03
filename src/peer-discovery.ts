@@ -119,7 +119,16 @@ export async function announceToNode(
       return null;
     }
 
-    const body = await resp.json() as { ok: boolean; peers?: any[] };
+    const body = await resp.json() as { ok: boolean; self?: { yggAddr?: string; publicKey?: string; alias?: string; version?: string }; peers?: any[] };
+    // Store the responder's self-declared metadata if provided
+    if (body.self?.yggAddr && body.self?.publicKey) {
+      upsertDiscoveredPeer(body.self.yggAddr, body.self.publicKey, {
+        alias: body.self.alias,
+        version: body.self.version,
+        discoveredVia: body.self.yggAddr,
+        source: "gossip",
+      });
+    }
     return body.peers ?? null;
   } catch (err: any) {
     console.warn(`[p2p:discovery] Announce to ${targetYggAddr.slice(0,20)}... error: ${err?.message}`);

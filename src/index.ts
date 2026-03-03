@@ -20,7 +20,7 @@ import { execSync } from "child_process";
 import { loadOrCreateIdentity, getActualIpv6 } from "./identity";
 import { startYggdrasil, stopYggdrasil, isYggdrasilAvailable, detectExternalYggdrasil, getYggdrasilNetworkInfo } from "./yggdrasil";
 import { initDb, listPeers, upsertPeer, removePeer, getPeer, flushDb } from "./peer-db";
-import { startPeerServer, stopPeerServer, getInbox } from "./peer-server";
+import { startPeerServer, stopPeerServer, getInbox, setSelfMeta } from "./peer-server";
 import { sendP2PMessage, pingPeer, broadcastLeave } from "./peer-client";
 import { bootstrapDiscovery, startDiscoveryLoop, stopDiscoveryLoop, DEFAULT_BOOTSTRAP_PEERS } from "./peer-discovery";
 import { upsertDiscoveredPeer } from "./peer-db";
@@ -172,6 +172,9 @@ export default function register(api: any) {
 
       // Start peer HTTP server
       await startPeerServer(peerPort, { testMode });
+
+      // Register self metadata so /peer/announce responses include our name/version
+      setSelfMeta({ yggAddr: identity.yggIpv6, publicKey: identity.publicKey, ..._agentMeta });
 
       // Wire incoming messages to OpenClaw gateway
       wireInboundToGateway(api);
