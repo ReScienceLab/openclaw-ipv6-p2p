@@ -1,5 +1,5 @@
 /**
- * claw-p2p — OpenClaw plugin entry point.
+ * DeClaw — OpenClaw plugin entry point.
  *
  * Enables direct P2P communication between OpenClaw instances via Yggdrasil IPv6.
  * Each node gets a globally-routable 200::/8 address derived from its Ed25519 keypair.
@@ -38,7 +38,7 @@ export default function register(api: any) {
     id: "ipv6-p2p-node",
 
     start: async () => {
-      const cfg: PluginConfig = api.config?.plugins?.entries?.["claw-p2p"]?.config ?? {};
+      const cfg: PluginConfig = api.config?.plugins?.entries?.["declaw"]?.config ?? {};
       dataDir = cfg.data_dir ?? dataDir;
       peerPort = cfg.peer_port ?? peerPort;
       const extraPeers: string[] = cfg.yggdrasil_peers ?? [];
@@ -224,7 +224,7 @@ export default function register(api: any) {
             console.error("Plugin not started. Restart the gateway first.");
             return;
           }
-          const cfg: PluginConfig = api.config?.plugins?.entries?.["claw-p2p"]?.config ?? {};
+          const cfg: PluginConfig = api.config?.plugins?.entries?.["declaw"]?.config ?? {};
           const bootstrapPeers: string[] = cfg.bootstrap_peers ?? [];
           const all = [...DEFAULT_BOOTSTRAP_PEERS, ...bootstrapPeers];
           console.log(`Discovering peers via ${all.length || "0"} bootstrap node(s)...`);
@@ -400,7 +400,7 @@ export default function register(api: any) {
       if (!identity) {
         return { content: [{ type: "text", text: "P2P service not started." }] };
       }
-      const cfg: PluginConfig = api.config?.plugins?.entries?.["claw-p2p"]?.config ?? {};
+      const cfg: PluginConfig = api.config?.plugins?.entries?.["declaw"]?.config ?? {};
       const bootstrapPeers: string[] = cfg.bootstrap_peers ?? [];
       const found = await bootstrapDiscovery(identity, peerPort, bootstrapPeers);
       const total = listPeers().length;

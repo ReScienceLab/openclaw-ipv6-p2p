@@ -5,10 +5,10 @@ version: 0.1.0
 metadata:
   openclaw:
     emoji: "🌐"
-    homepage: https://github.com/ReScienceLab/claw-p2p
+    homepage: https://github.com/ReScienceLab/declaw
     install:
       - kind: node
-        package: "@resciencelab/claw-p2p"
+        package: "@resciencelab/declaw"
 ---
 
 # Yggdrasil Setup Skill

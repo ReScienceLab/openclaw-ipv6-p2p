@@ -1,5 +1,5 @@
 {
-  "name": "@resciencelab/claw-p2p",
+  "name": "@resciencelab/declaw",
   "version": "0.1.1",
   "description": "Direct P2P communication between OpenClaw instances over Yggdrasil IPv6",
   "main": "dist/index.js",
@@ -28,7 +28,7 @@
       ]
     },
     "install": {
-      "npmSpec": "@resciencelab/claw-p2p",
+      "npmSpec": "@resciencelab/declaw",
       "defaultChoice": "npm"
     }
   },

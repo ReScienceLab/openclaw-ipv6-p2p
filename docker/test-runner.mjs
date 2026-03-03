@@ -99,7 +99,7 @@ if (ROLE === "client") {
     identity,
     PEER_ADDR,
     "chat",
-    "Hello from claw-p2p Docker test!",
+    "Hello from DeClaw Docker test!",
     PORT
   );
 
