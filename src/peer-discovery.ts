@@ -209,13 +209,17 @@ export async function bootstrapDiscovery(
 export function startDiscoveryLoop(
   identity: Identity,
   port: number = 8099,
-  intervalMs: number = 10 * 60 * 1000  // default: every 10 minutes
+  intervalMs: number = 10 * 60 * 1000,  // default: every 10 minutes
+  extraBootstrap: string[] = []
 ): void {
   if (_discoveryTimer) return;
 
+  // Protect both hardcoded and dynamically-configured bootstrap addresses from pruning
+  const protectedAddrs = [...new Set([...DEFAULT_BOOTSTRAP_PEERS, ...extraBootstrap])];
+
   const runGossip = async () => {
-    // Prune stale peers before gossiping (TTL = 3× interval, protect bootstrap nodes)
-    pruneStale(3 * intervalMs, DEFAULT_BOOTSTRAP_PEERS);
+    // Prune stale peers before gossiping (TTL = 3× interval)
+    pruneStale(3 * intervalMs, protectedAddrs);
 
     const peers = listPeers();
     if (peers.length === 0) return;

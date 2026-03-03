@@ -100,7 +100,7 @@ export default function register(api: any) {
         _startupTimer = null;
         console.log(`[p2p:discovery] Starting bootstrap — identity.yggIpv6: ${identity?.yggIpv6}`);
         await bootstrapDiscovery(identity!, peerPort, bootstrapPeers);
-        startDiscoveryLoop(identity!, peerPort, discoveryIntervalMs);
+        startDiscoveryLoop(identity!, peerPort, discoveryIntervalMs, bootstrapPeers);
       }, startupDelayMs);
     },
 

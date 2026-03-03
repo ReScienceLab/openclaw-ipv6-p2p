@@ -85,13 +85,14 @@ export async function startPeerServer(
       source: "gossip",
     });
 
-    // Absorb the peers they shared
+    // Absorb the peers they shared — preserve provenance timestamp
     for (const p of ann.peers ?? []) {
       if (p.yggAddr === ann.fromYgg) continue; // skip self-referential entries
       upsertDiscoveredPeer(p.yggAddr, p.publicKey, {
         alias: p.alias,
         discoveredVia: ann.fromYgg,
         source: "gossip",
+        lastSeen: p.lastSeen,
       });
     }
 
