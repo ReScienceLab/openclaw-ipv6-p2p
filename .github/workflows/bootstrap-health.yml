@@ -1,0 +1,104 @@
+name: Bootstrap Node Health
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"  # every 6 hours
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Yggdrasil
+        run: |
+          curl -fsSL https://www.yggdrasil-network.github.io/apt-key.gpg | sudo apt-key add -
+          echo "deb http://www.yggdrasil-network.github.io/apt/ debian main" \
+            | sudo tee /etc/apt/sources.list.d/yggdrasil.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq yggdrasil
+          yggdrasil -version
+
+      - name: Generate config with public peers
+        run: |
+          sudo yggdrasil -genconf | sudo tee /etc/yggdrasil.conf >/dev/null
+          # Inject public peers for mesh connectivity
+          sudo sed -i 's|Peers: \[\]|Peers: [\n    "tcp://yggdrasil.mnpnk.com:10002"\n    "tcp://ygg.mkg20001.io:80"\n    "tcp://46.246.86.205:60002"\n  ]|' /etc/yggdrasil.conf
+
+      - name: Start Yggdrasil daemon
+        run: |
+          sudo yggdrasil -useconffile /etc/yggdrasil.conf &
+          sleep 10
+          sudo yggdrasilctl getSelf || echo "Warning: getSelf failed"
+          sudo yggdrasilctl getPeers || echo "Warning: no peers yet"
+
+      - name: Fetch bootstrap node list
+        id: bootstrap
+        run: |
+          curl -fsSL https://resciencelab.github.io/DeClaw/bootstrap.json -o bootstrap.json
+          cat bootstrap.json | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          nodes = d['bootstrap_nodes']
+          print(f'::notice::Found {len(nodes)} bootstrap nodes (updated: {d[\"updated\"]})')
+          for n in nodes:
+              print(f'{n[\"label\"]}: [{n[\"yggAddr\"]}]:{n[\"port\"]}')
+          "
+
+      - name: Health check all bootstrap nodes
+        run: |
+          FAILED=0
+          TOTAL=0
+
+          while IFS= read -r line; do
+            ADDR=$(echo "$line" | python3 -c "import json,sys; n=json.loads(sys.stdin.read()); print(n['yggAddr'])")
+            PORT=$(echo "$line" | python3 -c "import json,sys; n=json.loads(sys.stdin.read()); print(n['port'])")
+            LABEL=$(echo "$line" | python3 -c "import json,sys; n=json.loads(sys.stdin.read()); print(n['label'])")
+            TOTAL=$((TOTAL + 1))
+
+            echo "--- ${LABEL} ---"
+
+            # 1. Ping endpoint
+            PING=$(curl -6 -sf --connect-timeout 15 --max-time 20 \
+              "http://[${ADDR}]:${PORT}/peer/ping" 2>/dev/null || echo "FAIL")
+            if [ "$PING" = "FAIL" ]; then
+              echo "  ✗ /peer/ping — unreachable"
+              FAILED=$((FAILED + 1))
+              continue
+            fi
+            echo "  ✓ /peer/ping — ${PING}"
+
+            # 2. Peers endpoint
+            PEERS=$(curl -6 -sf --connect-timeout 15 --max-time 20 \
+              "http://[${ADDR}]:${PORT}/peer/peers" 2>/dev/null || echo "FAIL")
+            if [ "$PEERS" = "FAIL" ]; then
+              echo "  ✗ /peer/peers — unreachable"
+            else
+              COUNT=$(echo "$PEERS" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('peers',[])))" 2>/dev/null || echo "?")
+              echo "  ✓ /peer/peers — ${COUNT} peers"
+            fi
+
+          done < <(python3 -c "
+          import json
+          with open('bootstrap.json') as f:
+              nodes = json.load(f)['bootstrap_nodes']
+          for n in nodes:
+              print(json.dumps(n))
+          ")
+
+          echo ""
+          echo "=== Summary: ${TOTAL} nodes checked, ${FAILED} failed ==="
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::warning::${FAILED}/${TOTAL} bootstrap nodes unreachable"
+          fi
+
+          # Fail the workflow if more than half are down
+          THRESHOLD=$(( (TOTAL + 1) / 2 ))
+          if [ "$FAILED" -ge "$THRESHOLD" ]; then
+            echo "::error::${FAILED}/${TOTAL} bootstrap nodes down — exceeds threshold"
+            exit 1
+          fi
