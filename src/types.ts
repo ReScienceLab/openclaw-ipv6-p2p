@@ -33,7 +33,7 @@ export interface PluginConfig {
   peer_port?: number;
   data_dir?: string;
   yggdrasil_peers?: string[];
-  test_mode?: boolean;
+  test_mode?: boolean | "auto";
   bootstrap_peers?: string[];
   discovery_interval_ms?: number;
   startup_delay_ms?: number;

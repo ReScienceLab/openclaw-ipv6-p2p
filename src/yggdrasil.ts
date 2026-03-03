@@ -14,7 +14,42 @@ const DEFAULT_BOOTSTRAP_PEERS = [
   "tcp://46.246.86.205:60002",
 ];
 
+const WELL_KNOWN_SOCKETS = [
+  "/var/run/yggdrasil.sock",
+  "/run/yggdrasil.sock",
+];
+
 let yggProcess: ChildProcess | null = null;
+
+/**
+ * Try to detect an already-running Yggdrasil daemon via its admin socket.
+ * Checks well-known socket paths and runs `yggdrasilctl getSelf`.
+ */
+export function detectExternalYggdrasil(extraSocketPaths: string[] = []): YggdrasilInfo | null {
+  const candidates = [...WELL_KNOWN_SOCKETS, ...extraSocketPaths];
+
+  for (const sock of candidates) {
+    if (!fs.existsSync(sock)) continue;
+    try {
+      const endpoint = sock.startsWith("unix://") ? sock : `unix://${sock}`;
+      const raw = execSync(`yggdrasilctl -json -endpoint ${endpoint} getSelf`, {
+        encoding: "utf-8",
+        timeout: 5000,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const data = JSON.parse(raw);
+      const address = data.address || data.IPv6Address || data.ipv6_address;
+      const subnet = data.subnet || data.IPv6Subnet || data.ipv6_subnet || "";
+      if (address) {
+        console.log(`[ygg] Detected external Yggdrasil daemon via ${sock}`);
+        return { address, subnet, pid: 0 };
+      }
+    } catch {
+      // Socket exists but yggdrasilctl failed — try next
+    }
+  }
+  return null;
+}
 
 /** Check if the yggdrasil binary is available on PATH. */
 export function isYggdrasilAvailable(): boolean {
@@ -69,17 +104,26 @@ export async function startYggdrasil(
     return null;
   }
 
+  // 1. Try to reuse an already-running system Yggdrasil
+  const pluginSock = path.join(dataDir, "yggdrasil", "yggdrasil.sock");
+  const external = detectExternalYggdrasil([pluginSock]);
+  if (external) {
+    console.log(`[ygg] Reusing external daemon — address: ${external.address}`);
+    return external;
+  }
+
+  // 2. No external daemon found — spawn our own
+  console.log("[ygg] No external Yggdrasil daemon detected — spawning managed instance");
   const yggDir = path.join(dataDir, "yggdrasil");
   fs.mkdirSync(yggDir, { recursive: true });
 
   const confFile = path.join(yggDir, "yggdrasil.conf");
-  const sockFile = path.join(yggDir, "yggdrasil.sock");
+  const sockFile = pluginSock;
   const logFile = path.join(yggDir, "yggdrasil.log");
 
   if (!fs.existsSync(confFile)) {
     generateConfig(confFile, sockFile, extraPeers);
   } else {
-    // Ensure IfName is auto on existing configs
     let conf = fs.readFileSync(confFile, "utf-8");
     const updated = conf.replace(/IfName:.*/, "IfName: auto");
     if (updated !== conf) {
@@ -97,6 +141,17 @@ export async function startYggdrasil(
   const info = await waitForAddress(logFile, 15);
   if (!info) {
     yggProcess.kill();
+    yggProcess = null;
+    return null;
+  }
+
+  // Verify the spawned process is still alive (TUN creation may fail without root)
+  await sleep(500);
+  if (yggProcess.exitCode !== null) {
+    const logContent = fs.readFileSync(logFile, "utf-8");
+    const panicMatch = logContent.match(/panic: (.+)/);
+    console.warn(`[ygg] Spawned Yggdrasil exited: ${panicMatch?.[1] ?? "unknown reason"}`);
+    console.warn("[ygg] TUN creation requires root. Use a system-level Yggdrasil daemon instead.");
     yggProcess = null;
     return null;
   }

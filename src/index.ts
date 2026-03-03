@@ -17,7 +17,7 @@
 import * as os from "os";
 import * as path from "path";
 import { loadOrCreateIdentity, getActualIpv6 } from "./identity";
-import { startYggdrasil, stopYggdrasil, isYggdrasilAvailable } from "./yggdrasil";
+import { startYggdrasil, stopYggdrasil, isYggdrasilAvailable, detectExternalYggdrasil } from "./yggdrasil";
 import { initDb, listPeers, upsertPeer, removePeer, getPeer } from "./peer-db";
 import { startPeerServer, stopPeerServer, getInbox } from "./peer-server";
 import { sendP2PMessage, pingPeer } from "./peer-client";
@@ -43,10 +43,19 @@ export default function register(api: any) {
       dataDir = cfg.data_dir ?? dataDir;
       peerPort = cfg.peer_port ?? peerPort;
       const extraPeers: string[] = cfg.yggdrasil_peers ?? [];
-      const testMode = cfg.test_mode ?? false;
-      _testMode = testMode;
       const bootstrapPeers: string[] = cfg.bootstrap_peers ?? [];
       const discoveryIntervalMs: number = cfg.discovery_interval_ms ?? 10 * 60 * 1000;
+
+      // Resolve test_mode: "auto" (default) detects Yggdrasil availability
+      const rawTestMode = cfg.test_mode ?? "auto";
+      const testMode = rawTestMode === "auto" ? !isYggdrasilAvailable() : rawTestMode;
+      _testMode = testMode;
+
+      if (rawTestMode === "auto") {
+        console.log(`[p2p] test_mode=auto — resolved to ${testMode ? "true (yggdrasil not found)" : "false (yggdrasil available)"}`);
+      } else {
+        console.log(`[p2p] test_mode=${testMode} (explicit config override)`);
+      }
 
       // Load or create Ed25519 identity
       identity = loadOrCreateIdentity(dataDir);
@@ -433,6 +442,7 @@ export default function register(api: any) {
     async execute(_id: string, _params: Record<string, never>) {
       const binaryAvailable = isYggdrasilAvailable();
       const daemonRunning = yggInfo !== null;
+      const externalDaemon = !daemonRunning ? detectExternalYggdrasil() : null;
 
       let addressType: string;
       let routable: boolean;
@@ -442,6 +452,10 @@ export default function register(api: any) {
         addressType = "yggdrasil (globally routable on the Yggdrasil network)";
         routable = true;
         address = yggInfo.address;
+      } else if (externalDaemon) {
+        addressType = "external yggdrasil daemon detected (not used by plugin — restart gateway)";
+        routable = false;
+        address = externalDaemon.address;
       } else if (_testMode) {
         addressType = "test_mode (reachable only on the local/Docker network)";
         routable = false;
@@ -455,7 +469,9 @@ export default function register(api: any) {
       const lines = [
         `Binary installed : ${binaryAvailable ? "Yes" : "No"}`,
         `Daemon running   : ${daemonRunning ? `Yes (pid ${yggInfo?.pid})` : "No"}`,
-        `Address          : ${address}`,
+        `External daemon  : ${externalDaemon ? `Yes (${externalDaemon.address})` : "No"}`,
+        `Plugin address   : ${identity?.yggIpv6 ?? "unknown"}`,
+        `Active address   : ${address}`,
         `Address type     : ${addressType}`,
         `Globally routable: ${routable ? "Yes" : "No"}`,
       ];
@@ -468,11 +484,19 @@ export default function register(api: any) {
           "Install instructions: see the yggdrasil skill (references/install.md).",
           "After installing, restart the OpenClaw gateway — the plugin will start Yggdrasil automatically."
         );
+      } else if (externalDaemon && !daemonRunning) {
+        lines.push(
+          "",
+          "An external Yggdrasil daemon was found but the plugin is not using it.",
+          "Restart the OpenClaw gateway to pick up the external daemon's address."
+        );
       } else if (!daemonRunning) {
         lines.push(
           "",
-          "Yggdrasil is installed but the managed daemon is not running.",
-          "Try restarting the OpenClaw gateway. The plugin starts Yggdrasil automatically on boot."
+          "Yggdrasil is installed but no daemon is running.",
+          "Start one with: sudo yggdrasil -useconffile /etc/yggdrasil.conf &",
+          "Or: sudo brew services start yggdrasil",
+          "Then restart the OpenClaw gateway."
         );
       }
 

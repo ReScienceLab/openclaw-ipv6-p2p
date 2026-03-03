@@ -24,9 +24,9 @@
         "description": "Additional Yggdrasil bootstrap peers"
       },
       "test_mode": {
-        "type": "boolean",
-        "default": false,
-        "description": "Skip Yggdrasil IP validation (for local/Docker testing without Yggdrasil daemon)"
+        "oneOf": [{ "type": "boolean" }, { "type": "string", "enum": ["auto"] }],
+        "default": "auto",
+        "description": "\"auto\" (default): use Yggdrasil if available, otherwise local-only. true: force local-only. false: require Yggdrasil."
       },
       "bootstrap_peers": {
         "type": "array",
