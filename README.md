@@ -22,7 +22,7 @@ Two Docker containers join the real Yggdrasil mesh, discover each other through 
   <a href="assets/demo-animation.mp4">Watch the demo animation</a>
 </video>
 
-<details>
+<details open>
 <summary>Terminal recording</summary>
 
 ![DeClaw terminal simulation](assets/demo.gif)
