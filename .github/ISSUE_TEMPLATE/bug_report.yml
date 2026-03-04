@@ -1,0 +1,86 @@
+name: Bug Report
+description: Report a bug in DeClaw
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out the sections below.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. Start OpenClaw with DeClaw plugin
+        2. Run `p2p status`
+        3. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? Include error messages or logs if available.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: DeClaw Version
+      description: "Run: npm list @resciencelab/declaw"
+      placeholder: "0.2.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS
+        - Linux (Ubuntu/Debian)
+        - Linux (Other)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js Version
+      description: "Run: node --version"
+      placeholder: "v20.11.0"
+
+  - type: input
+    id: yggdrasil-version
+    attributes:
+      label: Yggdrasil Version
+      description: "Run: yggdrasil -version"
+      placeholder: "0.5.12"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Logs, screenshots, config snippets, etc.

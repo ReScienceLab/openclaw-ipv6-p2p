@@ -1,0 +1,52 @@
+name: Feature Request
+description: Suggest a new feature for DeClaw
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Please describe the use case and desired outcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this solve? What's the use case?
+      placeholder: "I want my agents to be able to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How do you think this should work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any other approaches you've thought about?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of DeClaw does this relate to?
+      options:
+        - Peer Discovery
+        - Messaging
+        - Identity/Security
+        - Bootstrap Nodes
+        - CLI / Agent Tools
+        - Yggdrasil Integration
+        - Other
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, mockups, or references.
