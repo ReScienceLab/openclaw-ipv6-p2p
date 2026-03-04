@@ -50,7 +50,7 @@ export function initDb(dataDir: string): void {
   load();
 }
 
-export function listPeers(): PeerRecord[] {
+export function listPeers(): DiscoveredPeerRecord[] {
   return Object.values(store.peers).sort((a, b) => b.lastSeen - a.lastSeen);
 }
 
@@ -77,7 +77,7 @@ export function upsertPeer(yggAddr: string, alias: string = ""): void {
 export function upsertDiscoveredPeer(
   yggAddr: string,
   publicKey: string,
-  opts: { alias?: string; discoveredVia?: string; source?: "bootstrap" | "gossip"; lastSeen?: number } = {}
+  opts: { alias?: string; version?: string; discoveredVia?: string; source?: "bootstrap" | "gossip"; lastSeen?: number } = {}
 ): void {
   const now = Date.now();
   const existing = store.peers[yggAddr];
@@ -89,11 +89,15 @@ export function upsertDiscoveredPeer(
       existing.lastSeen = now;
     }
     if (!existing.discoveredVia) existing.discoveredVia = opts.discoveredVia;
+    if (opts.version) existing.version = opts.version;
+    // Refresh remote-declared name for non-manual peers
+    if (opts.alias && existing.source !== "manual") existing.alias = opts.alias;
   } else {
     store.peers[yggAddr] = {
       yggAddr,
       publicKey,
       alias: opts.alias ?? "",
+      version: opts.version,
       firstSeen: now,
       lastSeen: opts.lastSeen ?? now,
       source: opts.source ?? "gossip",

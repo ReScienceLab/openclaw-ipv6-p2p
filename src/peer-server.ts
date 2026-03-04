@@ -19,6 +19,13 @@ let server: FastifyInstance | null = null;
 const _inbox: (P2PMessage & { verified: boolean; receivedAt: number })[] = [];
 const _handlers: MessageHandler[] = [];
 
+interface SelfMeta { yggAddr?: string; publicKey?: string; alias?: string; version?: string }
+let _selfMeta: SelfMeta = {};
+
+export function setSelfMeta(meta: SelfMeta): void {
+  _selfMeta = meta;
+}
+
 export function onMessage(handler: MessageHandler): void {
   _handlers.push(handler);
 }
@@ -81,6 +88,7 @@ export async function startPeerServer(
     // TOFU: record the announcer
     upsertDiscoveredPeer(ann.fromYgg, ann.publicKey, {
       alias: ann.alias,
+      version: ann.version,
       discoveredVia: ann.fromYgg,
       source: "gossip",
     });
@@ -100,8 +108,11 @@ export async function startPeerServer(
       `[p2p] ↔ peer-exchange  from=${ann.fromYgg.slice(0, 20)}...  shared=${ann.peers?.length ?? 0} peers`
     );
 
-    // Return our own peer list
-    return { ok: true, peers: getPeersForExchange(20) };
+    // Return our own peer list + self metadata so the caller learns our name/version
+    const self = _selfMeta.yggAddr
+      ? { yggAddr: _selfMeta.yggAddr, publicKey: _selfMeta.publicKey, alias: _selfMeta.alias, version: _selfMeta.version }
+      : undefined;
+    return { ok: true, ...(self ? { self } : {}), peers: getPeersForExchange(20) };
   });
 
   server.post<{ Body: P2PMessage }>("/peer/message", async (req, reply) => {

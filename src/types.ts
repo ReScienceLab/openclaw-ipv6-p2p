@@ -30,6 +30,7 @@ export interface PeerRecord {
 }
 
 export interface PluginConfig {
+  agent_name?: string;
   peer_port?: number;
   data_dir?: string;
   yggdrasil_peers?: string[];
@@ -44,6 +45,7 @@ export interface PeerAnnouncement {
   fromYgg: string;
   publicKey: string;
   alias?: string;
+  version?: string;
   timestamp: number;
   signature: string;
   /** peers the sender knows about (shared for gossip) */
@@ -54,4 +56,5 @@ export interface PeerAnnouncement {
 export interface DiscoveredPeerRecord extends PeerRecord {
   discoveredVia?: string;  // yggAddr of the node that told us about this peer
   source: "manual" | "bootstrap" | "gossip";
+  version?: string;
 }

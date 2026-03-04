@@ -20,7 +20,7 @@ import { execSync } from "child_process";
 import { loadOrCreateIdentity, getActualIpv6 } from "./identity";
 import { startYggdrasil, stopYggdrasil, isYggdrasilAvailable, detectExternalYggdrasil, getYggdrasilNetworkInfo } from "./yggdrasil";
 import { initDb, listPeers, upsertPeer, removePeer, getPeer, flushDb } from "./peer-db";
-import { startPeerServer, stopPeerServer, getInbox } from "./peer-server";
+import { startPeerServer, stopPeerServer, getInbox, setSelfMeta } from "./peer-server";
 import { sendP2PMessage, pingPeer, broadcastLeave } from "./peer-client";
 import { bootstrapDiscovery, startDiscoveryLoop, stopDiscoveryLoop, DEFAULT_BOOTSTRAP_PEERS } from "./peer-discovery";
 import { upsertDiscoveredPeer } from "./peer-db";
@@ -95,6 +95,7 @@ let peerPort: number = 8099;
 let _testMode: boolean = false;
 let _startupTimer: ReturnType<typeof setTimeout> | null = null;
 let _bootstrapPeers: string[] = [];
+let _agentMeta: { name?: string; version?: string } = {};
 
 function tryConnectExternalDaemon(): YggdrasilInfo | null {
   const ext = detectExternalYggdrasil();
@@ -123,6 +124,8 @@ export default function register(api: any) {
       _bootstrapPeers = cfg.bootstrap_peers ?? [];
       const bootstrapPeers = _bootstrapPeers;
       const discoveryIntervalMs: number = cfg.discovery_interval_ms ?? 10 * 60 * 1000;
+      const pluginVersion: string = require("../package.json").version;
+      _agentMeta = { name: cfg.agent_name, version: pluginVersion };
 
       // Resolve test_mode: "auto" (default) detects Yggdrasil availability
       const rawTestMode = cfg.test_mode ?? "auto";
@@ -170,6 +173,9 @@ export default function register(api: any) {
       // Start peer HTTP server
       await startPeerServer(peerPort, { testMode });
 
+      // Register self metadata so /peer/announce responses include our name/version
+      setSelfMeta({ yggAddr: identity.yggIpv6, publicKey: identity.publicKey, ..._agentMeta });
+
       // Wire incoming messages to OpenClaw gateway
       wireInboundToGateway(api);
 
@@ -208,8 +214,8 @@ export default function register(api: any) {
       _startupTimer = setTimeout(async () => {
         _startupTimer = null;
         console.log(`[p2p:discovery] Starting bootstrap — identity.yggIpv6: ${identity?.yggIpv6}`);
-        await bootstrapDiscovery(identity!, peerPort, bootstrapPeers);
-        startDiscoveryLoop(identity!, peerPort, discoveryIntervalMs, bootstrapPeers);
+        await bootstrapDiscovery(identity!, peerPort, bootstrapPeers, _agentMeta);
+        startDiscoveryLoop(identity!, peerPort, discoveryIntervalMs, bootstrapPeers, _agentMeta);
       }, startupDelayMs);
     },
 
@@ -281,7 +287,9 @@ export default function register(api: any) {
             return;
           }
           console.log("=== IPv6 P2P Node Status ===");
+          if (_agentMeta.name) console.log(`Agent name:     ${_agentMeta.name}`);
           console.log(`Agent ID:       ${identity.agentId}`);
+          console.log(`Version:        v${_agentMeta.version}`);
           console.log(`CGA IPv6:       ${identity.cgaIpv6}`);
           console.log(`Yggdrasil:      ${yggInfo?.address ?? identity.yggIpv6 + " (no daemon)"}`);
           console.log(`Peer port:      ${peerPort}`);
@@ -301,8 +309,9 @@ export default function register(api: any) {
           console.log("=== Known Peers ===");
           for (const peer of peers) {
             const ago = Math.round((Date.now() - peer.lastSeen) / 1000);
-            const alias = peer.alias ? ` (${peer.alias})` : "";
-            console.log(`  ${peer.yggAddr}${alias}  last seen ${ago}s ago`);
+            const label = peer.alias ? ` — ${peer.alias}` : "";
+            const ver = peer.version ? ` [v${peer.version}]` : "";
+            console.log(`  ${peer.yggAddr}${label}${ver}  last seen ${ago}s ago`);
           }
         });
 
@@ -360,7 +369,7 @@ export default function register(api: any) {
           const bootstrapPeers: string[] = cfg.bootstrap_peers ?? [];
           const all = [...DEFAULT_BOOTSTRAP_PEERS, ...bootstrapPeers];
           console.log(`Discovering peers via ${all.length || "0"} bootstrap node(s)...`);
-          const found = await bootstrapDiscovery(identity, peerPort, bootstrapPeers);
+          const found = await bootstrapDiscovery(identity, peerPort, bootstrapPeers, _agentMeta);
           console.log(`Discovery complete — ${found} new peer(s) found. Total: ${listPeers().length}`);
         });
 
@@ -430,7 +439,11 @@ export default function register(api: any) {
     handler: () => {
       const peers = listPeers();
       if (peers.length === 0) return { text: "No peers yet. Use `openclaw p2p add <addr>`." };
-      const lines = peers.map((p) => `• \`${p.yggAddr}\`${p.alias ? ` — ${p.alias}` : ""}`);
+      const lines = peers.map((p) => {
+        const label = p.alias ? ` — ${p.alias}` : "";
+        const ver = p.version ? ` [v${p.version}]` : "";
+        return `• \`${p.yggAddr}\`${label}${ver}`;
+      });
       return { text: `**Known Peers**\n${lines.join("\n")}` };
     },
   });
@@ -517,7 +530,9 @@ export default function register(api: any) {
       }
       const lines = peers.map((p) => {
         const ago = Math.round((Date.now() - p.lastSeen) / 1000);
-        return `• ${p.yggAddr}${p.alias ? ` (${p.alias})` : ""} — last seen ${ago}s ago`;
+        const label = p.alias ? ` — ${p.alias}` : "";
+        const ver = p.version ? ` [v${p.version}]` : "";
+        return `• ${p.yggAddr}${label}${ver} — last seen ${ago}s ago`;
       });
       return { content: [{ type: "text", text: lines.join("\n") }] };
     },
@@ -536,7 +551,9 @@ export default function register(api: any) {
       const peers = listPeers();
       const inbox = getInbox();
       const lines = [
+        ...((_agentMeta.name) ? [`Agent name: ${_agentMeta.name}`] : []),
         `This agent's P2P address: ${addr}`,
+        `Plugin version: v${_agentMeta.version}`,
         `Known peers: ${peers.length}`,
         `Unread inbox: ${inbox.length} messages`,
       ];
@@ -556,7 +573,7 @@ export default function register(api: any) {
       }
       const cfg: PluginConfig = api.config?.plugins?.entries?.["declaw"]?.config ?? {};
       const bootstrapPeers: string[] = cfg.bootstrap_peers ?? [];
-      const found = await bootstrapDiscovery(identity, peerPort, bootstrapPeers);
+      const found = await bootstrapDiscovery(identity, peerPort, bootstrapPeers, _agentMeta);
       const total = listPeers().length;
       return {
         content: [{
@@ -597,7 +614,7 @@ export default function register(api: any) {
       const connected = tryConnectExternalDaemon();
       if (connected) {
         // Auto-trigger discovery in background
-        bootstrapDiscovery(identity!, peerPort, _bootstrapPeers).catch(() => {});
+        bootstrapDiscovery(identity!, peerPort, _bootstrapPeers, _agentMeta).catch(() => {});
         return {
           content: [{ type: "text", text:
             `Status: Ready (just connected)\n` +

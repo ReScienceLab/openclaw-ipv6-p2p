@@ -9,6 +9,10 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "agent_name": {
+        "type": "string",
+        "description": "Human-readable name for this agent instance, shared with peers during discovery (e.g. \"Alice's coder\")"
+      },
       "peer_port": {
         "type": "integer",
         "default": 8099,
@@ -46,6 +50,7 @@
     }
   },
   "uiHints": {
+    "agent_name": { "label": "Agent Name", "placeholder": "Alice's coder" },
     "peer_port": { "label": "Peer Server Port", "placeholder": "8099" },
     "data_dir": { "label": "Data Directory" },
     "yggdrasil_peers": { "label": "Extra Yggdrasil Peers" },

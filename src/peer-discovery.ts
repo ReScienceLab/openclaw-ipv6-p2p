@@ -57,7 +57,10 @@ let _discoveryTimer: NodeJS.Timeout | null = null;
 
 // ── Signed announcement builder ───────────────────────────────────────────────
 
-function buildAnnouncement(identity: Identity): Omit<PeerAnnouncement, "signature"> {
+function buildAnnouncement(
+  identity: Identity,
+  meta: { name?: string; version?: string } = {}
+): Omit<PeerAnnouncement, "signature"> {
   const myPeers = getPeersForExchange(MAX_SHARED_PEERS).map((p) => {
     const entry: { yggAddr: string; publicKey: string; alias?: string; lastSeen: number } = {
       yggAddr: p.yggAddr,
@@ -74,6 +77,8 @@ function buildAnnouncement(identity: Identity): Omit<PeerAnnouncement, "signatur
     timestamp: Date.now(),
     peers: myPeers,
   };
+  if (meta.name) ann.alias = meta.name;
+  if (meta.version) ann.version = meta.version;
   return ann;
 }
 
@@ -86,9 +91,10 @@ function buildAnnouncement(identity: Identity): Omit<PeerAnnouncement, "signatur
 export async function announceToNode(
   identity: Identity,
   targetYggAddr: string,
-  port: number = 8099
+  port: number = 8099,
+  meta: { name?: string; version?: string } = {}
 ): Promise<Array<{ yggAddr: string; publicKey: string; alias?: string; lastSeen: number }> | null> {
-  const payload = buildAnnouncement(identity);
+  const payload = buildAnnouncement(identity, meta);
   const signature = signMessage(identity.privateKey, payload as Record<string, unknown>);
   const announcement: PeerAnnouncement = { ...payload, signature };
 
@@ -113,7 +119,16 @@ export async function announceToNode(
       return null;
     }
 
-    const body = await resp.json() as { ok: boolean; peers?: any[] };
+    const body = await resp.json() as { ok: boolean; self?: { yggAddr?: string; publicKey?: string; alias?: string; version?: string }; peers?: any[] };
+    // Store the responder's self-declared metadata if provided
+    if (body.self?.yggAddr && body.self?.publicKey) {
+      upsertDiscoveredPeer(body.self.yggAddr, body.self.publicKey, {
+        alias: body.self.alias,
+        version: body.self.version,
+        discoveredVia: body.self.yggAddr,
+        source: "gossip",
+      });
+    }
     return body.peers ?? null;
   } catch (err: any) {
     console.warn(`[p2p:discovery] Announce to ${targetYggAddr.slice(0,20)}... error: ${err?.message}`);
@@ -130,7 +145,8 @@ export async function announceToNode(
 export async function bootstrapDiscovery(
   identity: Identity,
   port: number = 8099,
-  extraBootstrap: string[] = []
+  extraBootstrap: string[] = [],
+  meta: { name?: string; version?: string } = {}
 ): Promise<number> {
   const remotePeers = await fetchRemoteBootstrapPeers();
   const bootstrapAddrs = [
@@ -149,7 +165,7 @@ export async function bootstrapDiscovery(
 
   const results = await Promise.allSettled(
     bootstrapAddrs.map(async (addr) => {
-      const peers = await announceToNode(identity, addr, port);
+      const peers = await announceToNode(identity, addr, port, meta);
       return { addr, peers };
     })
   );
@@ -181,7 +197,7 @@ export async function bootstrapDiscovery(
   const fanout = fanoutCandidates.slice(0, MAX_FANOUT_PEERS);
   await Promise.allSettled(
     fanout.map((addr) =>
-      announceToNode(identity, addr, port).then((peers) => {
+      announceToNode(identity, addr, port, meta).then((peers) => {
         if (!peers) return;
         for (const p of peers) {
           if (p.yggAddr === identity.yggIpv6) continue;
@@ -210,7 +226,8 @@ export function startDiscoveryLoop(
   identity: Identity,
   port: number = 8099,
   intervalMs: number = 10 * 60 * 1000,  // default: every 10 minutes
-  extraBootstrap: string[] = []
+  extraBootstrap: string[] = [],
+  meta: { name?: string; version?: string } = {}
 ): void {
   if (_discoveryTimer) return;
 
@@ -232,7 +249,7 @@ export function startDiscoveryLoop(
     let updated = 0;
     await Promise.allSettled(
       sample.map(async (peer) => {
-        const received = await announceToNode(identity, peer.yggAddr, port);
+        const received = await announceToNode(identity, peer.yggAddr, port, meta);
         if (!received) return;
         // Direct contact succeeded — update lastSeen to now (omit lastSeen in opts)
         upsertDiscoveredPeer(peer.yggAddr, peer.publicKey, {
