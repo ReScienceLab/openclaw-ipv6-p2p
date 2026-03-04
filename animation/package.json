@@ -1,0 +1,21 @@
+{
+  "name": "declaw-animation",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "npx remotion studio src/index.tsx",
+    "render": "npx remotion render src/index.tsx DeclawDemo ../assets/demo-animation.mp4 --codec=h264"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.290",
+    "@remotion/renderer": "4.0.290",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.290"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.4.0"
+  }
+}

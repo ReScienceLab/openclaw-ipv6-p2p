@@ -22,3 +22,6 @@ __pycache__/
 
 # git worktrees
 .worktrees/*.tgz
+
+# Remotion build output
+animation/out/

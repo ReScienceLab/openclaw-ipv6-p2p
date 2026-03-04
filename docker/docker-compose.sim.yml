@@ -1,0 +1,50 @@
+networks:
+  declaw-sim:
+    driver: bridge
+
+volumes:
+  sim-shared:
+
+services:
+  alice:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sim
+    container_name: declaw-sim-alice
+    hostname: alice
+    # Yggdrasil needs NET_ADMIN to create a TUN interface and /dev/net/tun to open it
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - declaw-sim
+    volumes:
+      - sim-shared:/shared
+    environment:
+      ROLE: server
+      NODE_NAME: alice
+      P2P_PORT: "8099"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+  bob:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sim
+    container_name: declaw-sim-bob
+    hostname: bob
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - declaw-sim
+    volumes:
+      - sim-shared:/shared
+    environment:
+      ROLE: client
+      NODE_NAME: bob
+      P2P_PORT: "8099"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      - alice
