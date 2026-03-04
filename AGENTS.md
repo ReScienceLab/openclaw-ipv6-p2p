@@ -168,9 +168,9 @@ When creating new issues:
 
 ## Release Process
 
-### Automated Release (`scripts/release.sh`)
+### Release Pipeline (Local + CI)
 
-One command handles the full release pipeline:
+One command kicks off the release — CI handles the rest:
 
 ```bash
 bash scripts/release.sh patch   # 0.2.2 → 0.2.3
@@ -178,18 +178,35 @@ bash scripts/release.sh minor   # 0.2.2 → 0.3.0
 bash scripts/release.sh major   # 0.2.2 → 1.0.0
 ```
 
-The script performs these steps automatically:
+**Local (`scripts/release.sh`):**
 1. **Preflight**: verifies on `main`, clean tree, synced with remote
 2. **Build + test**: `npm run build` + `node --test test/*.test.mjs`
-3. **Version bump**: updates all 3 version-bearing files:
-   - `package.json` + `package-lock.json` (via `npm version --no-git-tag-version`)
-   - `openclaw.plugin.json` (plugin manifest)
-   - `skills/declaw/SKILL.md` (ClawHub skill frontmatter)
-4. **Changelog check**: warns if `CHANGELOG.md` is missing a section for the new version
-5. **Commit + tag**: `chore: release vX.Y.Z` + git tag `vX.Y.Z`
-6. **Push**: main branch + tags to origin
-7. **GitHub Release**: `gh release create` with auto-generated notes → triggers npm publish via CI
-8. **Backmerge**: main → develop → push
+3. **Version bump**: syncs all 3 version-bearing files
+4. **Changelog check**: warns if `CHANGELOG.md` is missing new version section
+5. **Commit + tag + push**: `chore: release vX.Y.Z` + tag `vX.Y.Z` → push to origin
+
+**CI (`.github/workflows/release.yml`, triggered by `v*` tag push):**
+6. **Build + test gate**: Node 20 + 22 matrix
+7. **GitHub Release**: auto-generated notes → triggers `publish.yml` (npm publish)
+8. **ClawHub publish**: `npx clawhub@latest publish` with `CLAWHUB_TOKEN` secret
+9. **Backmerge**: main → develop (via github-actions bot)
+
+### CI Workflows
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `release.yml` | Tag push `v*` | Verify → GH Release → ClawHub → Backmerge |
+| `publish.yml` | GH Release published | npm publish with `NPM_TOKEN` |
+| `test.yml` | Push/PR to main/develop | Build + test (Node 20+22) |
+| `auto-close-issues.yml` | PR merged | Close linked issues |
+| `bootstrap-health.yml` | Scheduled | Ping all 5 bootstrap nodes |
+
+### Required Secrets
+
+| Secret | Purpose |
+|---|---|
+| `NPM_TOKEN` | npm publish (Automation token) |
+| `CLAWHUB_TOKEN` | ClawHub skill publish |
 
 ### Pre-release: Update CHANGELOG
 
@@ -197,18 +214,6 @@ Before running the release script, update `CHANGELOG.md`:
 - Add a `[X.Y.Z] - YYYY-MM-DD` section
 - Categorize entries: `Breaking Changes`, `Added`, `Changed`, `Fixed`
 - Reference issues and PRs (e.g., `PR #8`, `Closes #7`)
-
-### Post-release Checklist
-
-The script prints these reminders after release:
-1. Verify npm: `https://www.npmjs.com/package/@resciencelab/declaw`
-2. Publish skill: `npx clawhub@latest publish skills/declaw`
-3. Deploy bootstrap if `bootstrap/server.mjs` changed (see below)
-
-### ClawHub Skill Publish
-- Verify login: `npx clawhub@latest whoami`
-- Publish: `npx clawhub@latest publish skills/declaw`
-- Version is already synced by the release script
 
 ### Bootstrap Node Deployment
 - Only needed when `bootstrap/server.mjs` or `bootstrap/package.json` changes
