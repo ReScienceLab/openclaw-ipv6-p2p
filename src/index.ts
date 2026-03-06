@@ -30,6 +30,8 @@ import { Identity, YggdrasilInfo, PluginConfig } from "./types";
 const DECLAW_TOOLS = [
   "p2p_add_peer", "p2p_discover", "p2p_list_peers",
   "p2p_send_message", "p2p_status", "yggdrasil_check",
+  "p2p_join_room", "p2p_leave_room",
+  "p2p_poll_room", "p2p_room_action",
 ]
 
 function ensureToolsAllowed(config: any): void {
@@ -96,6 +98,15 @@ let _testMode: boolean = false;
 let _startupTimer: ReturnType<typeof setTimeout> | null = null;
 let _bootstrapPeers: string[] = [];
 let _agentMeta: { name?: string; version?: string } = {};
+
+// ── Room state (p2p_join_room) ─────────────────────────────────────────────
+let _activeRoomAddr: string | null = null;
+let _activeRoomSeat: string | null = null;
+let _roomGameState: Record<string, unknown> = {};
+
+// ── Room event queue (p2p_poll_room) ──────────────────────────────────────
+const _roomEventQueue: Array<Record<string, unknown>> = []
+let _roomEventWaiter: ((e: Record<string, unknown> | null) => void) | null = null
 
 function tryConnectExternalDaemon(): YggdrasilInfo | null {
   const ext = detectExternalYggdrasil();
@@ -183,6 +194,54 @@ export default function register(api: any) {
 
       // Wire incoming messages to OpenClaw gateway
       wireInboundToGateway(api);
+
+      // Wire room event queue (feeds p2p_poll_room tool)
+      const { onMessage } = await import("./peer-server")
+      onMessage((msg) => {
+        if (!msg.verified) return
+        if (msg.event !== "room:event") return
+        if (_activeRoomAddr && msg.fromYgg !== _activeRoomAddr) return
+        let event: Record<string, unknown>
+        try { event = JSON.parse(msg.content) } catch { return }
+
+        const type = event.type as string
+
+        if (type === "room:welcome") {
+          _activeRoomSeat = event.role as string
+          _roomGameState = {}
+          // Inject sessions_spawn suggestion into main agent's conversation
+          const lines = [
+            `[DeClaw Room] Seated as ${event.role}. Game starting soon.`,
+            event.dashboardUrl ? `Dashboard: ${event.dashboardUrl}` : "",
+            ``,
+            `Please call sessions_spawn now to let a subagent play the game autonomously:`,
+            `task: "You are a Chinese standard mahjong AI player, seated at ${event.role}.`,
+            `Loop: call p2p_poll_room() to receive game events, decide your move, then call p2p_room_action().`,
+            `After game:gameover, summarize the result and exit."`,
+          ].filter(Boolean).join("\n")
+          try {
+            api.gateway?.receiveChannelMessage?.({
+              channelId: "declaw",
+              accountId: msg.fromYgg,
+              text: lines,
+              senderId: msg.fromYgg,
+            })
+          } catch {}
+          return // welcome handled; don't queue
+        }
+
+        if (type === "game:deal") {
+          _roomGameState = { ..._roomGameState, hand: event.hand, dora: event.doraIndicator, melds: [] }
+        }
+
+        // Deliver to waiting p2p_poll_room or enqueue
+        if (_roomEventWaiter) {
+          _roomEventWaiter(event)
+          _roomEventWaiter = null
+        } else {
+          _roomEventQueue.push(event)
+        }
+      })
 
       // First-run welcome message
       if (isFirstRun) {
@@ -450,9 +509,10 @@ export default function register(api: any) {
       const peers = listPeers();
       if (peers.length === 0) return { text: "No peers yet. Use `openclaw p2p add <addr>`." };
       const lines = peers.map((p) => {
+        const ago = Math.round((Date.now() - p.lastSeen) / 1000);
         const label = p.alias ? ` — ${p.alias}` : "";
         const ver = p.version ? ` [v${p.version}]` : "";
-        return `• \`${p.yggAddr}\`${label}${ver}`;
+        return `• \`${p.yggAddr}\`${label}${ver} — last seen ${ago}s ago`;
       });
       return { text: `**Known Peers**\n${lines.join("\n")}` };
     },
@@ -588,7 +648,9 @@ export default function register(api: any) {
       return {
         content: [{
           type: "text",
-          text: `Discovery complete — ${found} new peer(s) found. Known peers: ${total}`,
+          text:
+            `Discovery complete — ${found} new peer(s) found. Known peers: ${total}\n` +
+            `(Use p2p_peers to list them)`
         }],
       };
     },
@@ -647,4 +709,200 @@ export default function register(api: any) {
       };
     },
   });
+
+  // ── p2p_join_room ──────────────────────────────────────────────────────────
+  api.registerTool({
+    name: "p2p_join_room",
+    description:
+      "Discover and join a DeClaw game room (mahjong, etc.) hosted by another agent. " +
+      "After joining, you will receive a seat assignment and a prompt to spawn a game-playing subagent " +
+      "via sessions_spawn — the subagent uses p2p_poll_room and p2p_room_action to play autonomously. " +
+      "Call this when the user wants to join or start playing a game with other DeClaw agents.",
+    parameters: {
+      type: "object",
+      properties: {
+        room_addr: {
+          type: "string",
+          description:
+            "Yggdrasil address of the room host. If omitted, auto-discovers from peer list.",
+        },
+        room_type: {
+          type: "string",
+          description:
+            'Room type filter when auto-discovering (e.g. "mahjong"). Ignored if room_addr provided.',
+        },
+      },
+      required: [],
+    },
+    async execute(_id: string, params: { room_addr?: string; room_type?: string }) {
+      if (!identity) {
+        return { content: [{ type: "text", text: "Error: P2P service not started yet." }] }
+      }
+      // Resolve room address
+      let roomAddr = params.room_addr ?? ""
+      if (!roomAddr) {
+        const peers = listPeers()
+        const filter = params.room_type ?? ""
+        const room = peers.find((p) => {
+          const alias = (p.alias ?? "").toLowerCase()
+          return alias.includes("waiting") && (filter ? alias.includes(filter) : true)
+        })
+        if (!room) {
+          return {
+            content: [{
+              type: "text",
+              text:
+                "No game rooms found in peer list. " +
+                "Try running p2p_discover first, or provide room_addr directly.",
+            }],
+          }
+        }
+        roomAddr = room.yggAddr
+      }
+
+      // Leave any existing room
+      if (_activeRoomAddr) {
+        await sendP2PMessage(identity, _activeRoomAddr, "room:leave", "{}", peerPort)
+        _activeRoomAddr = null
+        _activeRoomSeat = null
+        _roomGameState = {}
+      }
+
+      _activeRoomAddr = roomAddr
+      _activeRoomSeat = null
+
+      // Send join request
+      const name = _agentMeta.name ?? identity.agentId.slice(0, 8)
+      const result = await sendP2PMessage(identity, roomAddr, "room:join",
+        JSON.stringify({ type: "room:join", name }), peerPort)
+
+      if (!result.ok) {
+        _activeRoomAddr = null
+        return {
+          content: [{ type: "text", text: `Failed to join room at ${roomAddr}: ${result.error}` }],
+          isError: true,
+        }
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text:
+            `Joined room at ${roomAddr}\n` +
+            `Agent name: ${name}\n` +
+            `Waiting for seat assignment — you will receive a message with sessions_spawn instructions shortly.`,
+        }],
+      }
+    },
+  })
+
+  // ── p2p_poll_room ───────────────────────────────────────────────────────────
+  api.registerTool({
+    name: "p2p_poll_room",
+    description:
+      "Wait for and return the next game event from the current room " +
+      "(game:deal, game:draw, game:claim_window, game:discard_event, game:gameover, etc.). " +
+      "Call this in a loop inside a sessions_spawn subagent to drive the game. " +
+      "After each event, respond with p2p_room_action. " +
+      "Returns null/timeout when no event arrives within timeout_seconds.",
+    parameters: {
+      type: "object",
+      properties: {
+        timeout_seconds: {
+          type: "number",
+          description: "Max seconds to wait for an event (default 25).",
+        },
+      },
+      required: [],
+    },
+    async execute(_id: string, params: { timeout_seconds?: number }) {
+      if (!_activeRoomAddr) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "not in any room" }) }] }
+      }
+      const timeout = (params.timeout_seconds ?? 25) * 1000
+
+      // Dequeue immediately if available
+      if (_roomEventQueue.length > 0) {
+        return { content: [{ type: "text", text: JSON.stringify(_roomEventQueue.shift()) }] }
+      }
+
+      // Wait for next event
+      const event = await new Promise<Record<string, unknown> | null>((resolve) => {
+        _roomEventWaiter = resolve
+        setTimeout(() => {
+          if (_roomEventWaiter === resolve) {
+            _roomEventWaiter = null
+            resolve(null)
+          }
+        }, timeout)
+      })
+
+      const result = event ?? {
+        type: "timeout",
+        seat: _activeRoomSeat,
+        hint: "No event within timeout. If in a claim window, call p2p_room_action with action='pass'.",
+      }
+      return { content: [{ type: "text", text: JSON.stringify(result) }] }
+    },
+  })
+
+  // ── p2p_room_action ─────────────────────────────────────────────────────────
+  api.registerTool({
+    name: "p2p_room_action",
+    description:
+      "Send a game action to the current room: discard, peng (pong), chi (chow), hu (win), gang (kong), or pass. " +
+      "Call this after p2p_poll_room returns a game:draw or game:claim_window event. " +
+      "For discard/chi/gang, provide the tile field. For chi, also provide use (the two hand tiles forming the sequence).",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["discard", "peng", "chi", "hu", "gang", "pass"],
+          description: "Action type.",
+        },
+        tile: {
+          type: "string",
+          description: "Tile notation, e.g. '3m', '7p', '1z'. Required for discard, chi, gang.",
+        },
+        use: {
+          type: "array",
+          items: { type: "string" },
+          description: "Two hand tiles used to complete the sequence when action='chi', e.g. ['2m','4m'].",
+        },
+      },
+      required: ["action"],
+    },
+    async execute(_id: string, params: { action: string; tile?: string; use?: string[] }) {
+      if (!_activeRoomAddr || !identity) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "not in any room" }) }] }
+      }
+      await sendP2PMessage(
+        identity, _activeRoomAddr, "room:action",
+        JSON.stringify({ type: "room:action", action: params }),
+        peerPort
+      )
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, action: params.action }) }] }
+    },
+  })
+
+  // ── p2p_leave_room ─────────────────────────────────────────────────────────
+  api.registerTool({
+    name: "p2p_leave_room",
+    description: "Leave the current DeClaw game room. Your agent will stop playing.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async execute(_id: string, _params: Record<string, never>) {
+      if (!_activeRoomAddr) {
+        return { content: [{ type: "text", text: "Not currently in any room." }] }
+      }
+      if (identity) {
+        await sendP2PMessage(identity, _activeRoomAddr, "room:leave", "{}", peerPort)
+      }
+      const addr = _activeRoomAddr
+      _activeRoomAddr = null
+      _activeRoomSeat = null
+      _roomGameState = {}
+      return { content: [{ type: "text", text: `Left room at ${addr}` }] }
+    },
+  })
 }
