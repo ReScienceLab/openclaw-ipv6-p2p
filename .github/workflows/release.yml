@@ -40,7 +40,7 @@ jobs:
       - run: npm run build
       - run: node --test test/*.test.mjs
 
-  # ── 2. Tag + GitHub Release → triggers publish.yml (npm) ────────────────
+  # ── 2. Tag + GitHub Release ───────────────────────────────────────────────
   github-release:
     needs: [check, verify]
     runs-on: ubuntu-latest
@@ -55,7 +55,29 @@ jobs:
           git push origin "v${VERSION}"
           gh release create "v${VERSION}" --generate-notes --title "v${VERSION}"
 
-  # ── 3. Publish to ClawHub ──────────────────────────────────────────────
+  # ── 3. Publish to npm ────────────────────────────────────────────────────
+  # publish.yml cannot be triggered by a GITHUB_TOKEN-created release, so we
+  # publish directly here instead.
+  npm-publish:
+    needs: [check, github-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm ci
+      - run: npm run build
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ── 4. Publish to ClawHub ─────────────────────────────────────────────────
   clawhub-publish:
     needs: [check, verify]
     runs-on: ubuntu-latest
@@ -72,19 +94,43 @@ jobs:
           npx clawhub@latest auth login --token "$CLAWHUB_TOKEN" --no-browser
           npx clawhub@latest publish "$(pwd)/skills/declaw" --version "$VERSION"
 
-  # ── 4. Backmerge main → develop ────────────────────────────────────────
+  # ── 5. Backmerge main → develop ──────────────────────────────────────────
+  # With squash-merge strategy, direct merges often conflict due to diverged
+  # history. Try a direct merge first; on conflict, open a PR instead.
   backmerge:
     needs: github-release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Merge main into develop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout develop
-          git merge main --no-edit
-          git push origin develop
+          if git merge main --no-edit; then
+            git push origin develop
+            echo "Backmerge pushed directly to develop"
+          else
+            git merge --abort
+            BRANCH="chore/backmerge-v${VERSION}"
+            git checkout -b "$BRANCH"
+            git merge main -X theirs --no-edit
+            git push origin "$BRANCH"
+            gh pr create \
+              --base develop \
+              --head "$BRANCH" \
+              --title "chore: backmerge main into develop (v${VERSION})" \
+              --body "Automated backmerge of \`main\` → \`develop\` after release v${VERSION}.
+
+Direct merge had conflicts (expected with squash-merge strategy). This PR uses \`-X theirs\` to resolve conflicts in favour of main."
+            echo "Conflict detected — backmerge PR created for $BRANCH"
+          fi
