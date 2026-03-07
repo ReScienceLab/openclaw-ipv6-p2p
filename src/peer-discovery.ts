@@ -122,7 +122,7 @@ export async function announceToNode(
       return null;
     }
 
-    const body = await resp.json() as { ok: boolean; self?: { yggAddr?: string; publicKey?: string; alias?: string; version?: string }; peers?: any[] };
+    const body = await resp.json() as { ok: boolean; self?: { yggAddr?: string; publicKey?: string; alias?: string; version?: string; endpoints?: PeerEndpoint[] }; peers?: any[] };
     // Store the responder's self-declared metadata if provided
     if (body.self?.yggAddr && body.self?.publicKey) {
       upsertDiscoveredPeer(body.self.yggAddr, body.self.publicKey, {
@@ -130,6 +130,7 @@ export async function announceToNode(
         version: body.self.version,
         discoveredVia: body.self.yggAddr,
         source: "gossip",
+        endpoints: body.self.endpoints,
       });
     }
     return body.peers ?? null;
@@ -188,6 +189,7 @@ export async function bootstrapDiscovery(
         discoveredVia: addr,
         source: "bootstrap",
         lastSeen: p.lastSeen,
+        endpoints: p.endpoints,
       });
       fanoutCandidates.push(p.yggAddr);
       totalDiscovered++;
@@ -209,6 +211,7 @@ export async function bootstrapDiscovery(
             discoveredVia: addr,
             source: "gossip",
             lastSeen: p.lastSeen,
+            endpoints: p.endpoints,
           });
         }
       })
@@ -259,6 +262,7 @@ export function startDiscoveryLoop(
           alias: peer.alias,
           discoveredVia: peer.yggAddr,
           source: "gossip",
+          endpoints: peer.endpoints,
         });
         for (const p of received) {
           if (p.yggAddr === identity.yggIpv6) continue;
@@ -268,6 +272,7 @@ export function startDiscoveryLoop(
             discoveredVia: peer.yggAddr,
             source: "gossip",
             lastSeen: p.lastSeen,
+            endpoints: p.endpoints,
           });
           updated++;
         }

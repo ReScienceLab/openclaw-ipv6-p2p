@@ -4,8 +4,8 @@
  * chat directly with peers via the standard OpenClaw UI.
  */
 import { Identity } from "./types";
-import { sendP2PMessage } from "./peer-client";
-import { listPeers, getPeerAddresses, upsertPeer } from "./peer-db";
+import { sendP2PMessage, SendOptions } from "./peer-client";
+import { listPeers, getPeerAddresses, getPeer, upsertPeer } from "./peer-db";
 import { onMessage } from "./peer-server";
 
 /** JSON Schema for channels.declaw — required for OpenClaw Control UI config form */
@@ -39,7 +39,7 @@ export const CHANNEL_CONFIG_SCHEMA = {
   },
 }
 
-export function buildChannel(identity: Identity, port: number) {
+export function buildChannel(identity: Identity, port: number, getSendOpts?: (addr: string) => SendOptions) {
   return {
     id: "declaw",
     meta: {
@@ -65,7 +65,8 @@ export function buildChannel(identity: Identity, port: number) {
     outbound: {
       deliveryMode: "direct" as const,
       sendText: async ({ text, account }: { text: string; account: { yggAddr: string } }) => {
-        const result = await sendP2PMessage(identity, account.yggAddr, "chat", text, port);
+        const opts = getSendOpts?.(account.yggAddr)
+        const result = await sendP2PMessage(identity, account.yggAddr, "chat", text, port, 10_000, opts);
         if (!result.ok) {
           console.error(`[declaw] Failed to send to ${account.yggAddr}: ${result.error}`);
         }

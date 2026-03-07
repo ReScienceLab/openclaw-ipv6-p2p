@@ -179,30 +179,48 @@ export class QUICTransport implements Transport {
         }
       })
 
-      // Try STUN discovery for public endpoint (skip in test mode)
+      // Try STUN discovery for public endpoint (skip in test mode).
+      // We also create a companion IPv4 UDP socket on the same port so the
+      // STUN-mapped port matches the port we are actually listening on.
       if (!testMode) {
-        for (const server of STUN_SERVERS) {
-          // Create a temporary IPv4 socket for STUN (most STUN servers are IPv4)
-          const stunSocket = dgram.createSocket("udp4")
-          try {
-            await new Promise<void>((resolve, reject) => {
-              stunSocket.on("error", reject)
-              stunSocket.bind(0, () => {
-                stunSocket.removeListener("error", reject)
-                resolve()
-              })
+        let stunSocket: dgram.Socket | null = null
+        try {
+          stunSocket = dgram.createSocket("udp4")
+          await new Promise<void>((resolve, reject) => {
+            stunSocket!.on("error", reject)
+            stunSocket!.bind(actualPort, () => {
+              stunSocket!.removeListener("error", reject)
+              resolve()
             })
-            const result = await stunDiscover(stunSocket, server, 3000)
-            stunSocket.close()
-            if (result) {
-              this._publicEndpoint = result
-              this._address = `${result.address}:${result.port}`
-              console.log(`[transport:quic] Public endpoint: ${this._address} (via ${server})`)
-              break
-            }
-          } catch {
-            try { stunSocket.close() } catch { /* ignore */ }
+          })
+        } catch {
+          // Port already taken on IPv4 — fall back to ephemeral port
+          try { stunSocket?.close() } catch { /* ignore */ }
+          stunSocket = dgram.createSocket("udp4")
+          await new Promise<void>((resolve, reject) => {
+            stunSocket!.on("error", reject)
+            stunSocket!.bind(0, () => {
+              stunSocket!.removeListener("error", reject)
+              resolve()
+            })
+          }).catch(() => { stunSocket = null })
+        }
+
+        if (stunSocket) {
+          for (const server of STUN_SERVERS) {
+            try {
+              const result = await stunDiscover(stunSocket, server, 3000)
+              if (result) {
+                this._publicEndpoint = result
+                // Use STUN-discovered public IP but always advertise the actual
+                // listening port (in case STUN socket was ephemeral).
+                this._address = `${result.address}:${actualPort}`
+                console.log(`[transport:quic] Public endpoint: ${this._address} (via ${server})`)
+                break
+              }
+            } catch { /* try next */ }
           }
+          try { stunSocket.close() } catch { /* ignore */ }
         }
       }
 

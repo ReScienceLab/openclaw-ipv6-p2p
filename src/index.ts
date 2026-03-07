@@ -20,7 +20,7 @@ import { loadOrCreateIdentity, getActualIpv6 } from "./identity";
 import { startYggdrasil, stopYggdrasil, isYggdrasilAvailable, detectExternalYggdrasil, getYggdrasilNetworkInfo } from "./yggdrasil";
 import { initDb, listPeers, upsertPeer, removePeer, getPeer, flushDb } from "./peer-db";
 import { startPeerServer, stopPeerServer, getInbox, setSelfMeta } from "./peer-server";
-import { sendP2PMessage, pingPeer, broadcastLeave } from "./peer-client";
+import { sendP2PMessage, pingPeer, broadcastLeave, SendOptions } from "./peer-client";
 import { bootstrapDiscovery, startDiscoveryLoop, stopDiscoveryLoop, DEFAULT_BOOTSTRAP_PEERS } from "./peer-discovery";
 import { upsertDiscoveredPeer } from "./peer-db";
 import { buildChannel, wireInboundToGateway, CHANNEL_CONFIG_SCHEMA } from "./channel";
@@ -101,6 +101,15 @@ let _agentMeta: { name?: string; version?: string; endpoints?: PeerEndpoint[]; t
 let _transportManager: TransportManager | null = null;
 let _yggTransport: YggdrasilTransport | null = null;
 let _quicTransport: QUICTransport | null = null;
+
+/** Build SendOptions from current transport state and optional peer endpoints. */
+function buildSendOpts(peerAddr?: string): SendOptions {
+  const peer = peerAddr ? getPeer(peerAddr) : null
+  return {
+    endpoints: (peer as any)?.endpoints,
+    quicTransport: _quicTransport?.isActive() ? _quicTransport : undefined,
+  }
+}
 
 function tryConnectExternalDaemon(): YggdrasilInfo | null {
   // Try via transport layer first
@@ -284,7 +293,7 @@ export default function register(api: any) {
       stopDiscoveryLoop();
       // Broadcast signed leave tombstone to all known peers before shutting down
       if (identity) {
-        await broadcastLeave(identity, listPeers(), peerPort);
+        await broadcastLeave(identity, listPeers(), peerPort, buildSendOpts());
       }
       flushDb();
       await stopPeerServer();
@@ -298,7 +307,7 @@ export default function register(api: any) {
 
   // ── 2. OpenClaw Channel ────────────────────────────────────────────────────
   if (identity) {
-    api.registerChannel({ plugin: buildChannel(identity, peerPort) });
+    api.registerChannel({ plugin: buildChannel(identity, peerPort, buildSendOpts) });
   } else {
     // Register lazily after service starts — use a proxy channel
     // that reads identity at send-time
@@ -326,7 +335,7 @@ export default function register(api: any) {
           deliveryMode: "direct" as const,
           sendText: async ({ text, account }: { text: string; account: { yggAddr: string } }) => {
             if (!identity) return { ok: false };
-            const r = await sendP2PMessage(identity, account.yggAddr, "chat", text, peerPort);
+            const r = await sendP2PMessage(identity, account.yggAddr, "chat", text, peerPort, 10_000, buildSendOpts(account.yggAddr));
             return { ok: r.ok };
           },
         },
@@ -416,7 +425,7 @@ export default function register(api: any) {
             console.error("Plugin not started. Restart the gateway first.");
             return;
           }
-          const result = await sendP2PMessage(identity, yggAddr, "chat", message, 8099);
+          const result = await sendP2PMessage(identity, yggAddr, "chat", message, 8099, 10_000, buildSendOpts(yggAddr));
           if (result.ok) {
             console.log(`✓ Message sent to ${yggAddr}`);
           } else {
@@ -576,7 +585,7 @@ export default function register(api: any) {
         return { content: [{ type: "text", text: "Error: P2P service not started yet." }] };
       }
       // Use the peer's port (default 8099) — not peerPort which is the local listening port
-      const result = await sendP2PMessage(identity, params.ygg_addr, "chat", params.message, params.port ?? 8099);
+      const result = await sendP2PMessage(identity, params.ygg_addr, "chat", params.message, params.port ?? 8099, 10_000, buildSendOpts(params.ygg_addr));
       if (result.ok) {
         return {
           content: [{ type: "text", text: `Message delivered to ${params.ygg_addr}` }],
