@@ -11,6 +11,8 @@ import { P2PMessage, Endpoint } from "./types"
 import { verifySignature, agentIdFromPublicKey } from "./identity"
 import { tofuVerifyAndCache, getPeersForExchange, upsertDiscoveredPeer, removePeer } from "./peer-db"
 
+const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000 // 5 minutes
+
 export type MessageHandler = (msg: P2PMessage & { verified: boolean }) => void
 
 let server: FastifyInstance | null = null
@@ -135,6 +137,10 @@ export async function startPeerServer(
       return reply.code(400).send({ error: "agentId does not match publicKey" })
     }
 
+    if (raw.timestamp && Math.abs(Date.now() - raw.timestamp) > MAX_MESSAGE_AGE_MS) {
+      return reply.code(400).send({ error: "Message timestamp too old or too far in the future" })
+    }
+
     if (!tofuVerifyAndCache(agentId, raw.publicKey)) {
       return reply.code(403).send({
         error: `Public key mismatch for ${agentId} — possible key rotation, re-add peer`,
@@ -198,6 +204,10 @@ export function handleUdpMessage(data: Buffer, from: string): boolean {
   }
 
   if (agentIdFromPublicKey(raw.publicKey) !== raw.from) {
+    return false
+  }
+
+  if (raw.timestamp && Math.abs(Date.now() - raw.timestamp) > MAX_MESSAGE_AGE_MS) {
     return false
   }
 
