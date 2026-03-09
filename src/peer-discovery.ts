@@ -16,7 +16,14 @@ import { listPeers, upsertDiscoveredPeer, getPeersForExchange, pruneStale } from
 const BOOTSTRAP_JSON_URL =
   "https://resciencelab.github.io/DAP/bootstrap.json"
 
-export async function fetchRemoteBootstrapPeers(): Promise<string[]> {
+export interface BootstrapNode {
+  yggAddr?: string
+  quicAddr?: string
+  httpPort: number
+  udpPort?: number
+}
+
+export async function fetchRemoteBootstrapPeers(): Promise<BootstrapNode[]> {
   try {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 10_000)
@@ -24,21 +31,32 @@ export async function fetchRemoteBootstrapPeers(): Promise<string[]> {
     clearTimeout(timer)
     if (!resp.ok) return []
     const data = (await resp.json()) as {
-      bootstrap_nodes?: { yggAddr: string; port?: number }[]
+      bootstrap_nodes?: {
+        yggAddr?: string
+        quicAddr?: string | null
+        httpPort?: number
+        port?: number
+        udpPort?: number | null
+      }[]
     }
-    return (data.bootstrap_nodes ?? []).map((n) => n.yggAddr)
+    return (data.bootstrap_nodes ?? []).map((n) => ({
+      yggAddr: n.yggAddr || undefined,
+      quicAddr: n.quicAddr || undefined,
+      httpPort: n.httpPort ?? n.port ?? 8099,
+      udpPort: n.udpPort || undefined,
+    }))
   } catch {
     console.warn("[p2p:discovery] Could not fetch remote bootstrap list — using hardcoded fallback")
     return []
   }
 }
 
-export const DEFAULT_BOOTSTRAP_PEERS: string[] = [
-  "200:697f:bda:1e8e:706a:6c5e:630b:51d",
-  "200:e1a5:b063:958:8f74:ec45:8eb0:e30e",
-  "200:9cf6:eaf1:7d3e:14b0:5869:2140:b618",
-  "202:adbc:dde1:e272:1cdb:97d0:8756:4f77",
-  "200:5ec6:62dd:9e91:3752:820c:98f5:5863",
+export const DEFAULT_BOOTSTRAP_PEERS: BootstrapNode[] = [
+  { yggAddr: "200:697f:bda:1e8e:706a:6c5e:630b:51d", httpPort: 8099 },
+  { yggAddr: "200:e1a5:b063:958:8f74:ec45:8eb0:e30e", httpPort: 8099 },
+  { yggAddr: "200:9cf6:eaf1:7d3e:14b0:5869:2140:b618", httpPort: 8099 },
+  { yggAddr: "202:adbc:dde1:e272:1cdb:97d0:8756:4f77", httpPort: 8099 },
+  { yggAddr: "200:5ec6:62dd:9e91:3752:820c:98f5:5863", httpPort: 8099 },
 ]
 
 const EXCHANGE_TIMEOUT_MS = 30_000
@@ -159,27 +177,40 @@ export async function announceToNode(
 export async function bootstrapDiscovery(
   identity: Identity,
   port: number = 8099,
-  extraBootstrap: string[] = [],
+  extraBootstrap: string[] | BootstrapNode[] = [],
   meta: { name?: string; version?: string; endpoints?: Endpoint[] } = {}
 ): Promise<number> {
-  const remotePeers = await fetchRemoteBootstrapPeers()
-  const bootstrapAddrs = [
-    ...new Set([...remotePeers, ...DEFAULT_BOOTSTRAP_PEERS, ...extraBootstrap]),
-  ].filter((a) => a && a !== identity.yggIpv6 && a !== identity.agentId)
+  const remoteNodes = await fetchRemoteBootstrapPeers()
+  const normalizedExtra: BootstrapNode[] = (extraBootstrap as any[]).map((e) =>
+    typeof e === "string" ? { yggAddr: e, httpPort: port } : e
+  )
 
-  if (bootstrapAddrs.length === 0) {
+  const seen = new Set<string>()
+  const bootstrapNodes: BootstrapNode[] = []
+  for (const n of [...remoteNodes, ...DEFAULT_BOOTSTRAP_PEERS, ...normalizedExtra]) {
+    const key = n.yggAddr || n.quicAddr || ""
+    if (!key) continue
+    if (key === identity.yggIpv6 || key === identity.agentId) continue
+    if (seen.has(key)) continue
+    seen.add(key)
+    bootstrapNodes.push(n)
+  }
+
+  if (bootstrapNodes.length === 0) {
     console.log("[p2p:discovery] No bootstrap nodes configured — skipping initial discovery.")
     return 0
   }
 
-  console.log(`[p2p:discovery] Bootstrapping via ${bootstrapAddrs.length} node(s) (parallel)...`)
+  console.log(`[p2p:discovery] Bootstrapping via ${bootstrapNodes.length} node(s) (parallel)...`)
 
   let totalDiscovered = 0
   const fanoutCandidates: Array<{ addr: string }> = []
 
   const results = await Promise.allSettled(
-    bootstrapAddrs.map(async (addr) => {
-      const peers = await announceToNode(identity, addr, port, meta)
+    bootstrapNodes.map(async (node) => {
+      const addr = node.yggAddr || node.quicAddr
+      if (!addr) return { addr: "", peers: null }
+      const peers = await announceToNode(identity, addr, node.httpPort, meta)
       return { addr, peers }
     })
   )
@@ -187,6 +218,7 @@ export async function bootstrapDiscovery(
   for (const result of results) {
     if (result.status !== "fulfilled") continue
     const { addr, peers } = result.value
+    if (!addr) continue
     if (!peers) {
       console.warn(`[p2p:discovery] Bootstrap ${addr.slice(0, 20)}... unreachable`)
       continue
@@ -236,12 +268,20 @@ export function startDiscoveryLoop(
   identity: Identity,
   port: number = 8099,
   intervalMs: number = 10 * 60 * 1000,
-  extraBootstrap: string[] = [],
+  extraBootstrap: string[] | BootstrapNode[] = [],
   meta: { name?: string; version?: string; endpoints?: Endpoint[] } = {}
 ): void {
   if (_discoveryTimer) return
 
-  const protectedAddrs = [...new Set([...DEFAULT_BOOTSTRAP_PEERS, ...extraBootstrap])]
+  const normalizedExtra: BootstrapNode[] = (extraBootstrap as any[]).map((e) =>
+    typeof e === "string" ? { yggAddr: e, httpPort: port } : e
+  )
+  const protectedAddrs = [
+    ...new Set([
+      ...DEFAULT_BOOTSTRAP_PEERS.map((n) => n.yggAddr).filter((a): a is string => !!a),
+      ...normalizedExtra.map((n) => n.yggAddr).filter((a): a is string => !!a),
+    ]),
+  ]
 
   const runGossip = async () => {
     pruneStale(3 * intervalMs, protectedAddrs)

@@ -1,38 +1,48 @@
 {
   "version": 1,
-  "updated": "2026-03-03T12:00:00Z",
+  "updated": "2026-03-09T00:00:00Z",
   "bootstrap_nodes": [
     {
       "yggAddr": "200:697f:bda:1e8e:706a:6c5e:630b:51d",
-      "port": 8099,
+      "httpPort": 8099,
+      "quicAddr": null,
+      "udpPort": null,
       "region": "us-east-2",
       "provider": "aws",
       "label": "bootstrap-us-east-2"
     },
     {
       "yggAddr": "200:e1a5:b063:958:8f74:ec45:8eb0:e30e",
-      "port": 8099,
+      "httpPort": 8099,
+      "quicAddr": null,
+      "udpPort": null,
       "region": "us-west-2",
       "provider": "aws",
       "label": "bootstrap-us-west-2"
     },
     {
       "yggAddr": "200:9cf6:eaf1:7d3e:14b0:5869:2140:b618",
-      "port": 8099,
+      "httpPort": 8099,
+      "quicAddr": null,
+      "udpPort": null,
       "region": "eu-west-1",
       "provider": "aws",
       "label": "bootstrap-eu-west-1"
     },
     {
       "yggAddr": "202:adbc:dde1:e272:1cdb:97d0:8756:4f77",
-      "port": 8099,
+      "httpPort": 8099,
+      "quicAddr": null,
+      "udpPort": null,
       "region": "ap-northeast-1",
       "provider": "aws",
       "label": "bootstrap-ap-northeast-1"
     },
     {
       "yggAddr": "200:5ec6:62dd:9e91:3752:820c:98f5:5863",
-      "port": 8099,
+      "httpPort": 8099,
+      "quicAddr": null,
+      "udpPort": null,
       "region": "ap-southeast-1",
       "provider": "aws",
       "label": "bootstrap-ap-southeast-1"
