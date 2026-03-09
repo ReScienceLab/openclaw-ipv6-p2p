@@ -279,7 +279,7 @@ export class UDPTransport implements Transport {
       transport: "quic",
       address: this._address,
       port: this._port,
-      priority: 10,
+      priority: 0,
       ttl: 3600,
     }
   }

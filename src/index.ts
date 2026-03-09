@@ -141,10 +141,10 @@ export default function register(api: any) {
       _yggTransport = new YggdrasilTransport()
       _quicTransport = new UDPTransport()
 
+      _transportManager.register(_quicTransport)
       if (!testMode) {
         _transportManager.register(_yggTransport)
       }
-      _transportManager.register(_quicTransport)
 
       const quicPort = cfg.quic_port ?? 8098
       const activeTransport = await _transportManager.start(identity, {

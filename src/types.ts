@@ -13,7 +13,7 @@ export interface Endpoint {
 // ── Identity types ──────────────────────────────────────────────────────────
 
 export interface Identity {
-  agentId: string       // hex(sha256(publicKey))[:16] — permanent anchor
+  agentId: string       // hex(sha256(publicKey))[:32] — permanent anchor
   publicKey: string     // base64 Ed25519 public key
   privateKey: string    // base64 Ed25519 private key (never leaves local storage)
   cgaIpv6?: string      // runtime: CGA-derived address (used internally by Ygg transport)

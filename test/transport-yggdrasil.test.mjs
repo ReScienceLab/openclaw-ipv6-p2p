@@ -19,7 +19,7 @@ describe("YggdrasilTransport", () => {
     const yt = new YggdrasilTransport()
     const ep = yt.getEndpoint()
     assert.equal(ep.transport, "yggdrasil")
-    assert.equal(ep.priority, 1)
+    assert.equal(ep.priority, 10)
   })
 
   it("start returns false when yggdrasil binary unavailable", async () => {

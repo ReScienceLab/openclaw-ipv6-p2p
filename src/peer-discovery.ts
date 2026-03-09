@@ -82,14 +82,10 @@ function hostFromAddress(addr: string): string {
   return addr
 }
 
-/** Get a reachable HTTP address (host only) from a peer's endpoints, preferring Yggdrasil. */
+/** Get a reachable address (host only) from a peer's endpoints, by priority (lower = preferred). */
 function reachableAddr(peer: { agentId: string; endpoints?: Endpoint[] }): string | null {
   if (!peer.endpoints?.length) return null
   const sorted = [...peer.endpoints].sort((a, b) => a.priority - b.priority)
-  const ygg = sorted.find((e) => e.transport === "yggdrasil")
-  if (ygg) return hostFromAddress(ygg.address)
-  const quic = sorted.find((e) => e.transport === "quic")
-  if (quic) return hostFromAddress(quic.address)
   return sorted[0] ? hostFromAddress(sorted[0].address) : null
 }
 

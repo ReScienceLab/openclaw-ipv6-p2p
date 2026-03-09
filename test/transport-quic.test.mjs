@@ -92,7 +92,7 @@ describe("UDPTransport", () => {
     const qt = new UDPTransport()
     const ep = qt.getEndpoint()
     assert.equal(ep.transport, "quic")
-    assert.equal(ep.priority, 10)
+    assert.equal(ep.priority, 0)
   })
 
   it("can start and stop in test mode", async () => {
