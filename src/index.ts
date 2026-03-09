@@ -10,7 +10,7 @@ import { execSync } from "child_process"
 import { loadOrCreateIdentity, getActualIpv6 } from "./identity"
 import { startYggdrasil, stopYggdrasil, isYggdrasilAvailable, detectExternalYggdrasil, getYggdrasilNetworkInfo } from "./yggdrasil"
 import { initDb, listPeers, upsertPeer, removePeer, getPeer, flushDb, getPeerIds, getEndpointAddress } from "./peer-db"
-import { startPeerServer, stopPeerServer, getInbox, setSelfMeta } from "./peer-server"
+import { startPeerServer, stopPeerServer, getInbox, setSelfMeta, handleUdpMessage } from "./peer-server"
 import { sendP2PMessage, pingPeer, broadcastLeave, SendOptions } from "./peer-client"
 import { bootstrapDiscovery, startDiscoveryLoop, stopDiscoveryLoop, DEFAULT_BOOTSTRAP_PEERS } from "./peer-discovery"
 import { upsertDiscoveredPeer } from "./peer-db"
@@ -174,6 +174,9 @@ export default function register(api: any) {
 
         if (_quicTransport.isActive()) {
           console.log(`[p2p] QUIC endpoint: ${_quicTransport.address}`)
+          _quicTransport.onMessage((from, data) => {
+            handleUdpMessage(data, from)
+          })
         }
       } else {
         console.warn("[p2p] No transport available — falling back to local-only mode")

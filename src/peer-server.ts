@@ -180,3 +180,56 @@ export async function stopPeerServer(): Promise<void> {
 export function getInbox(): typeof _inbox {
   return _inbox
 }
+
+/**
+ * Process a raw UDP datagram as a P2PMessage.
+ * Returns true if the message was valid and handled, false otherwise.
+ */
+export function handleUdpMessage(data: Buffer, from: string): boolean {
+  let raw: any
+  try {
+    raw = JSON.parse(data.toString("utf-8"))
+  } catch {
+    return false
+  }
+
+  if (!raw || !raw.from || !raw.publicKey || !raw.event || !raw.signature) {
+    return false
+  }
+
+  if (agentIdFromPublicKey(raw.publicKey) !== raw.from) {
+    return false
+  }
+
+  const sigData = canonical(raw)
+  if (!verifySignature(raw.publicKey, sigData, raw.signature)) {
+    return false
+  }
+
+  if (!tofuVerifyAndCache(raw.from, raw.publicKey)) {
+    return false
+  }
+
+  const msg: P2PMessage = {
+    from: raw.from,
+    publicKey: raw.publicKey,
+    event: raw.event,
+    content: raw.content,
+    timestamp: raw.timestamp,
+    signature: raw.signature,
+  }
+
+  if (msg.event === "leave") {
+    removePeer(raw.from)
+    console.log(`[p2p] <- leave (UDP) from=${raw.from}`)
+    return true
+  }
+
+  const entry = { ...msg, verified: true, receivedAt: Date.now() }
+  _inbox.unshift(entry)
+  if (_inbox.length > 500) _inbox.pop()
+
+  console.log(`[p2p] <- verified (UDP) from=${raw.from}  event=${msg.event}`)
+  _handlers.forEach((h) => h(entry))
+  return true
+}
