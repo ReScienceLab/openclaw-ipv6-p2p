@@ -7,7 +7,7 @@
 import * as os from "os"
 import * as path from "path"
 import { execSync } from "child_process"
-import { loadOrCreateIdentity, getActualIpv6 } from "./identity"
+import { loadOrCreateIdentity, getActualIpv6, deriveDidKey } from "./identity"
 import { startYggdrasil, stopYggdrasil, isYggdrasilAvailable, detectExternalYggdrasil, getYggdrasilNetworkInfo } from "./yggdrasil"
 import { initDb, listPeers, upsertPeer, removePeer, getPeer, flushDb, getPeerIds, getEndpointAddress } from "./peer-db"
 import { startPeerServer, stopPeerServer, getInbox, setSelfMeta, handleUdpMessage } from "./peer-server"
@@ -315,6 +315,7 @@ export default function register(api: any) {
           console.log("=== P2P Node Status ===")
           if (_agentMeta.name) console.log(`Agent name:     ${_agentMeta.name}`)
           console.log(`Agent ID:       ${identity.agentId}`)
+          console.log(`DID Key:        ${deriveDidKey(identity.publicKey)}`)
           console.log(`Version:        v${_agentMeta.version}`)
           console.log(`Transport:      ${_transportManager?.active?.id ?? "none"}`)
           if (_yggTransport?.isActive()) {
@@ -462,6 +463,7 @@ export default function register(api: any) {
         text: [
           `**P2P Node**`,
           `Agent ID: \`${identity.agentId}\``,
+          `DID Key: \`${deriveDidKey(identity.publicKey)}\``,
           `Transport: ${activeTransport?.id ?? "none"}`,
           ...(_yggTransport?.isActive() ? [`Yggdrasil: \`${yggInfo?.address ?? identity.yggIpv6}\``] : []),
           ...(_quicTransport?.isActive() ? [`QUIC: \`${_quicTransport.address}\``] : []),
@@ -571,6 +573,7 @@ export default function register(api: any) {
       const lines = [
         ...((_agentMeta.name) ? [`Agent name: ${_agentMeta.name}`] : []),
         `Agent ID: ${identity.agentId}`,
+        `DID Key: ${deriveDidKey(identity.publicKey)}`,
         `Active transport: ${activeTransport?.id ?? "none"}`,
         ...(_yggTransport?.isActive() ? [`Yggdrasil: ${yggInfo?.address ?? identity.yggIpv6}`] : []),
         ...(_quicTransport?.isActive() ? [`QUIC endpoint: ${_quicTransport.address}`] : []),
