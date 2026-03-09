@@ -11,7 +11,7 @@
 
 import { Identity, Endpoint } from "./types"
 import { signMessage, agentIdFromPublicKey } from "./identity"
-import { listPeers, upsertDiscoveredPeer, getPeersForExchange, pruneStale, getEndpointAddress } from "./peer-db"
+import { listPeers, upsertDiscoveredPeer, getPeersForExchange, pruneStale } from "./peer-db"
 
 const BOOTSTRAP_JSON_URL =
   "https://resciencelab.github.io/DeClaw/bootstrap.json"
@@ -71,10 +71,26 @@ function buildAnnouncement(
   return ann
 }
 
-/** Get a reachable HTTP address from a peer's endpoints or fall back to agentId. */
+/** Extract the host portion from an endpoint address (strip port if present). */
+function hostFromAddress(addr: string): string {
+  // [ipv6]:port → ipv6
+  const bracketMatch = addr.match(/^\[([^\]]+)\]:(\d+)$/)
+  if (bracketMatch) return bracketMatch[1]
+  // ipv4:port → ipv4 (only if exactly one colon)
+  const parts = addr.split(":")
+  if (parts.length === 2 && /^\d+$/.test(parts[1])) return parts[0]
+  return addr
+}
+
+/** Get a reachable HTTP address (host only) from a peer's endpoints, preferring Yggdrasil. */
 function reachableAddr(peer: { agentId: string; endpoints?: Endpoint[] }): string | null {
-  const ygg = peer.endpoints?.find((e) => e.transport === "yggdrasil")
-  return ygg?.address ?? null
+  if (!peer.endpoints?.length) return null
+  const sorted = [...peer.endpoints].sort((a, b) => a.priority - b.priority)
+  const ygg = sorted.find((e) => e.transport === "yggdrasil")
+  if (ygg) return hostFromAddress(ygg.address)
+  const quic = sorted.find((e) => e.transport === "quic")
+  if (quic) return hostFromAddress(quic.address)
+  return sorted[0] ? hostFromAddress(sorted[0].address) : null
 }
 
 export async function announceToNode(
@@ -242,7 +258,7 @@ export function startDiscoveryLoop(
     let updated = 0
     await Promise.allSettled(
       sample.map(async (peer) => {
-        const addr = getEndpointAddress(peer, "yggdrasil")
+        const addr = reachableAddr(peer)
         if (!addr) return
         const received = await announceToNode(identity, addr, port, meta)
         if (!received) return
