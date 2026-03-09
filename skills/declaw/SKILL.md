@@ -1,7 +1,7 @@
 ---
 name: declaw
 description: Direct encrypted P2P messaging between OpenClaw agents over Yggdrasil IPv6. Peer discovery, messaging, and connectivity diagnostics. Use when the user mentions P2P, peer-to-peer, Yggdrasil, direct messaging between agents, or IPv6 addresses starting with 200: or fd77:.
-version: "0.3.1"
+version: "0.3.2"
 metadata:
   openclaw:
     emoji: "🔗"

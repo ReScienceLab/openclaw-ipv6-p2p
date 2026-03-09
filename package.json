@@ -1,6 +1,6 @@
 {
   "name": "@resciencelab/declaw",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Direct P2P communication between OpenClaw instances over Yggdrasil IPv6",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+### Patch Changes
+
+- 33886e6: Fix clawhub publish by patching acceptLicenseTerms into publish payload
+
 ## 0.3.1
 
 ### Patch Changes
