@@ -162,6 +162,14 @@ export function pruneStale(maxAgeMs: number, protectedIds: string[] = []): numbe
   return pruned
 }
 
+const DEFAULT_TOFU_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+let _tofuTtlMs: number = DEFAULT_TOFU_TTL_MS
+
+export function setTofuTtl(days: number): void {
+  _tofuTtlMs = days * 24 * 60 * 60 * 1000
+}
+
 export function tofuVerifyAndCache(agentId: string, publicKey: string): boolean {
   const now = Date.now()
   const existing = store.peers[agentId]
@@ -175,6 +183,7 @@ export function tofuVerifyAndCache(agentId: string, publicKey: string): boolean 
       capabilities: [],
       firstSeen: now,
       lastSeen: now,
+      tofuCachedAt: now,
       source: "gossip",
     }
     saveImmediate()
@@ -183,6 +192,17 @@ export function tofuVerifyAndCache(agentId: string, publicKey: string): boolean 
 
   if (!existing.publicKey) {
     existing.publicKey = publicKey
+    existing.tofuCachedAt = now
+    existing.lastSeen = now
+    saveImmediate()
+    return true
+  }
+
+  // TTL check: if binding has expired, accept new key as fresh TOFU
+  if (existing.tofuCachedAt && now - existing.tofuCachedAt > _tofuTtlMs) {
+    console.log(`[p2p:db] TOFU TTL expired for ${agentId} — accepting new key`)
+    existing.publicKey = publicKey
+    existing.tofuCachedAt = now
     existing.lastSeen = now
     saveImmediate()
     return true
@@ -193,8 +213,32 @@ export function tofuVerifyAndCache(agentId: string, publicKey: string): boolean 
   }
 
   existing.lastSeen = now
+  if (!existing.tofuCachedAt) existing.tofuCachedAt = now
   save()
   return true
+}
+
+export function tofuReplaceKey(agentId: string, newPublicKey: string): void {
+  const now = Date.now()
+  const existing = store.peers[agentId]
+  if (existing) {
+    existing.publicKey = newPublicKey
+    existing.tofuCachedAt = now
+    existing.lastSeen = now
+  } else {
+    store.peers[agentId] = {
+      agentId,
+      publicKey: newPublicKey,
+      alias: "",
+      endpoints: [],
+      capabilities: [],
+      firstSeen: now,
+      lastSeen: now,
+      tofuCachedAt: now,
+      source: "gossip",
+    }
+  }
+  saveImmediate()
 }
 
 /** Extract a reachable address from a peer's endpoints for a given transport. */

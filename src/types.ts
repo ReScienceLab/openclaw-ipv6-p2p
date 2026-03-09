@@ -68,6 +68,7 @@ export interface PeerRecord {
 }
 
 export interface DiscoveredPeerRecord extends PeerRecord {
+  tofuCachedAt?: number   // timestamp when TOFU binding was first established
   discoveredVia?: string
   source: "manual" | "bootstrap" | "gossip"
   version?: string
@@ -85,6 +86,7 @@ export interface PluginConfig {
   bootstrap_peers?: string[]
   discovery_interval_ms?: number
   startup_delay_ms?: number
+  tofu_ttl_days?: number
 }
 
 // ── Key rotation (future) ───────────────────────────────────────────────────
