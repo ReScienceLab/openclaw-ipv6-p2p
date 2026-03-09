@@ -1,181 +1,245 @@
 /**
  * P2P peer HTTP server listening on [::]:8099.
- * Handles incoming messages from other OpenClaw nodes via Yggdrasil.
  *
- * Trust model (ported from agents/peer.py, simplified — no central registry):
- *   1. TCP source IP must be in 200::/8 (Yggdrasil) — network-layer auth
- *   2. from_ygg in body must match TCP source IP — prevent body spoofing
- *   3. Ed25519 signature must be valid — application-layer auth
- *   4. TOFU: first message caches the public key; subsequent must match
+ * Trust model (transport-agnostic):
+ *   Layer 1 — Transport security (TLS/Yggdrasil/WireGuard — handled by transport)
+ *   Layer 2 — Ed25519 signature (universal trust anchor)
+ *   Layer 3 — TOFU: agentId -> publicKey binding
  */
-import Fastify, { FastifyInstance } from "fastify";
-import { P2PMessage, PeerAnnouncement } from "./types";
-import { verifySignature } from "./identity";
-import { toufuVerifyAndCache, getPeersForExchange, upsertDiscoveredPeer, removePeer } from "./peer-db";
+import Fastify, { FastifyInstance } from "fastify"
+import { P2PMessage, Endpoint } from "./types"
+import { verifySignature, agentIdFromPublicKey } from "./identity"
+import { tofuVerifyAndCache, getPeersForExchange, upsertDiscoveredPeer, removePeer } from "./peer-db"
 
-export type MessageHandler = (msg: P2PMessage & { verified: boolean }) => void;
+const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000 // 5 minutes
 
-let server: FastifyInstance | null = null;
-const _inbox: (P2PMessage & { verified: boolean; receivedAt: number })[] = [];
-const _handlers: MessageHandler[] = [];
+export type MessageHandler = (msg: P2PMessage & { verified: boolean }) => void
 
-interface SelfMeta { yggAddr?: string; publicKey?: string; alias?: string; version?: string }
-let _selfMeta: SelfMeta = {};
+let server: FastifyInstance | null = null
+const _inbox: (P2PMessage & { verified: boolean; receivedAt: number })[] = []
+const _handlers: MessageHandler[] = []
+
+interface SelfMeta {
+  agentId?: string
+  publicKey?: string
+  alias?: string
+  version?: string
+  endpoints?: Endpoint[]
+}
+let _selfMeta: SelfMeta = {}
 
 export function setSelfMeta(meta: SelfMeta): void {
-  _selfMeta = meta;
+  _selfMeta = meta
 }
 
 export function onMessage(handler: MessageHandler): void {
-  _handlers.push(handler);
+  _handlers.push(handler)
 }
 
-/** Build the canonical object that the sender signed (all fields except signature). */
 function canonical(msg: P2PMessage): Record<string, unknown> {
   return {
-    fromYgg: msg.fromYgg,
+    from: msg.from,
     publicKey: msg.publicKey,
     event: msg.event,
     content: msg.content,
     timestamp: msg.timestamp,
-  };
+  }
 }
 
-/** Check whether an IPv6 address is in the Yggdrasil 200::/7 range. */
 export function isYggdrasilAddr(addr: string): boolean {
-  const clean = addr.replace(/^::ffff:/, "");
-  return /^2[0-9a-f]{2}:/i.test(clean);
+  const clean = addr.replace(/^::ffff:/, "")
+  return /^2[0-9a-f]{2}:/i.test(clean)
 }
 
 export async function startPeerServer(
   port: number = 8099,
-  opts: { testMode?: boolean } = {}
+  opts: { testMode?: boolean; yggdrasilActive?: boolean } = {}
 ): Promise<void> {
-  const testMode = opts.testMode ?? false;
-  server = Fastify({ logger: false });
+  const testMode = opts.testMode ?? false
+  const yggActive = opts.yggdrasilActive ?? false
+  server = Fastify({ logger: false })
 
-  server.get("/peer/ping", async () => ({ ok: true, ts: Date.now() }));
+  server.get("/peer/ping", async () => ({ ok: true, ts: Date.now() }))
+  server.get("/peer/inbox", async () => _inbox.slice(0, 100))
+  server.get("/peer/peers", async () => ({ peers: getPeersForExchange(20) }))
 
-  server.get("/peer/inbox", async () => _inbox.slice(0, 100));
+  server.post("/peer/announce", async (req, reply) => {
+    const ann = req.body as any
+    const srcIp = (req.socket.remoteAddress ?? "").replace(/^::ffff:/, "")
 
-  // Return our known peer list (for passive discovery)
-  server.get("/peer/peers", async () => ({
-    peers: getPeersForExchange(20),
-  }));
-
-  // Peer exchange / announce endpoint
-  server.post<{ Body: PeerAnnouncement }>("/peer/announce", async (req, reply) => {
-    const ann = req.body;
-    const srcIp = req.socket.remoteAddress ?? "";
-
-    if (!testMode) {
-      if (!isYggdrasilAddr(srcIp)) {
-        return reply.code(403).send({ error: "Source is not a Yggdrasil address" });
-      }
-      const normalizedSrc = srcIp.replace(/^::ffff:/, "");
-      if (ann.fromYgg !== normalizedSrc) {
-        return reply.code(403).send({ error: `fromYgg ${ann.fromYgg} does not match TCP source ${normalizedSrc}` });
-      }
+    // Network-layer gate: when Yggdrasil is active, only accept from 200::/7
+    if (yggActive && !testMode && !isYggdrasilAddr(srcIp)) {
+      return reply.code(403).send({ error: `Non-Yggdrasil source ${srcIp} rejected` })
     }
 
-    // Verify signature over announcement fields (excluding signature itself)
-    const { signature, ...signable } = ann;
+    const { signature, ...signable } = ann
     if (!verifySignature(ann.publicKey, signable as Record<string, unknown>, signature)) {
-      return reply.code(403).send({ error: "Invalid announcement signature" });
+      return reply.code(403).send({ error: "Invalid announcement signature" })
     }
-    const _peers = ann.peers;
 
-    // TOFU: record the announcer
-    upsertDiscoveredPeer(ann.fromYgg, ann.publicKey, {
+    const agentId: string = ann.from
+    if (!agentId) {
+      return reply.code(400).send({ error: "Missing 'from' (agentId)" })
+    }
+
+    if (agentIdFromPublicKey(ann.publicKey) !== agentId) {
+      return reply.code(400).send({ error: "agentId does not match publicKey" })
+    }
+
+    const endpoints: Endpoint[] = ann.endpoints ?? []
+
+    upsertDiscoveredPeer(agentId, ann.publicKey, {
       alias: ann.alias,
       version: ann.version,
-      discoveredVia: ann.fromYgg,
+      discoveredVia: agentId,
       source: "gossip",
-    });
+      endpoints,
+    })
 
-    // Absorb the peers they shared — preserve provenance timestamp
     for (const p of ann.peers ?? []) {
-      if (p.yggAddr === ann.fromYgg) continue; // skip self-referential entries
-      upsertDiscoveredPeer(p.yggAddr, p.publicKey, {
+      if (!p.agentId || p.agentId === agentId) continue
+      upsertDiscoveredPeer(p.agentId, p.publicKey, {
         alias: p.alias,
-        discoveredVia: ann.fromYgg,
+        discoveredVia: agentId,
         source: "gossip",
         lastSeen: p.lastSeen,
-      });
+        endpoints: p.endpoints ?? [],
+      })
     }
 
-    console.log(
-      `[p2p] ↔ peer-exchange  from=${ann.fromYgg.slice(0, 20)}...  shared=${ann.peers?.length ?? 0} peers`
-    );
+    console.log(`[p2p] peer-exchange  from=${agentId}  shared=${ann.peers?.length ?? 0} peers`)
 
-    // Return our own peer list + self metadata so the caller learns our name/version
-    const self = _selfMeta.yggAddr
-      ? { yggAddr: _selfMeta.yggAddr, publicKey: _selfMeta.publicKey, alias: _selfMeta.alias, version: _selfMeta.version }
-      : undefined;
-    return { ok: true, ...(self ? { self } : {}), peers: getPeersForExchange(20) };
-  });
+    const self = _selfMeta.agentId
+      ? { agentId: _selfMeta.agentId, publicKey: _selfMeta.publicKey, alias: _selfMeta.alias, version: _selfMeta.version, endpoints: _selfMeta.endpoints }
+      : undefined
+    return { ok: true, ...(self ? { self } : {}), peers: getPeersForExchange(20) }
+  })
 
-  server.post<{ Body: P2PMessage }>("/peer/message", async (req, reply) => {
-    const msg = req.body;
-    const srcIp = req.socket.remoteAddress ?? "";
+  server.post("/peer/message", async (req, reply) => {
+    const raw = req.body as any
+    const srcIp = (req.socket.remoteAddress ?? "").replace(/^::ffff:/, "")
 
-    if (!testMode) {
-      // Step 1: Verify source is Yggdrasil
-      if (!isYggdrasilAddr(srcIp)) {
-        return reply.code(403).send({ error: "Source is not a Yggdrasil address (200::/8 required)" });
-      }
-
-      // Step 2: from_ygg must match TCP source IP
-      const normalizedSrc = srcIp.replace(/^::ffff:/, "");
-      if (msg.fromYgg !== normalizedSrc) {
-        return reply.code(403).send({
-          error: `from_ygg ${msg.fromYgg} does not match TCP source ${normalizedSrc}`,
-        });
-      }
+    if (yggActive && !testMode && !isYggdrasilAddr(srcIp)) {
+      return reply.code(403).send({ error: `Non-Yggdrasil source ${srcIp} rejected` })
     }
 
-    // Step 3: Ed25519 signature
-    if (!verifySignature(msg.publicKey, canonical(msg), msg.signature)) {
-      return reply.code(403).send({ error: "Invalid Ed25519 signature" });
+    const sigData = canonical(raw)
+    if (!verifySignature(raw.publicKey, sigData, raw.signature)) {
+      return reply.code(403).send({ error: "Invalid Ed25519 signature" })
     }
 
-    // Step 4: TOFU cache
-    if (!toufuVerifyAndCache(msg.fromYgg, msg.publicKey)) {
+    const agentId: string = raw.from
+    if (!agentId) {
+      return reply.code(400).send({ error: "Missing 'from' (agentId)" })
+    }
+
+    if (agentIdFromPublicKey(raw.publicKey) !== agentId) {
+      return reply.code(400).send({ error: "agentId does not match publicKey" })
+    }
+
+    if (raw.timestamp && Math.abs(Date.now() - raw.timestamp) > MAX_MESSAGE_AGE_MS) {
+      return reply.code(400).send({ error: "Message timestamp too old or too far in the future" })
+    }
+
+    if (!tofuVerifyAndCache(agentId, raw.publicKey)) {
       return reply.code(403).send({
-        error: `Public key mismatch for ${msg.fromYgg} — possible key rotation, re-add peer`,
-      });
+        error: `Public key mismatch for ${agentId} — possible key rotation, re-add peer`,
+      })
     }
 
-    // Signed tombstone: peer is gracefully leaving — remove from routing table
+    const msg: P2PMessage = {
+      from: agentId,
+      publicKey: raw.publicKey,
+      event: raw.event,
+      content: raw.content,
+      timestamp: raw.timestamp,
+      signature: raw.signature,
+    }
+
     if (msg.event === "leave") {
-      removePeer(msg.fromYgg);
-      console.log(`[p2p] ← leave  from=${msg.fromYgg.slice(0, 20)}... — removed from peer table`);
-      return { ok: true };
+      removePeer(agentId)
+      console.log(`[p2p] <- leave  from=${agentId} — removed from peer table`)
+      return { ok: true }
     }
 
-    const entry = { ...msg, verified: true, receivedAt: Date.now() };
-    _inbox.unshift(entry);
-    if (_inbox.length > 500) _inbox.pop();
+    const entry = { ...msg, verified: true, receivedAt: Date.now() }
+    _inbox.unshift(entry)
+    if (_inbox.length > 500) _inbox.pop()
 
-    console.log(
-      `[p2p] ← verified  from=${msg.fromYgg.slice(0, 20)}...  event=${msg.event}`
-    );
+    console.log(`[p2p] <- verified  from=${agentId}  event=${msg.event}`)
 
-    _handlers.forEach((h) => h(entry));
-    return { ok: true };
-  });
+    _handlers.forEach((h) => h(entry))
+    return { ok: true }
+  })
 
-  await server.listen({ port, host: "::" });
-  console.log(`[p2p] Peer server listening on [::]:${port}${testMode ? " (test mode)" : ""}`);
+  await server.listen({ port, host: "::" })
+  console.log(`[p2p] Peer server listening on [::]:${port}${testMode ? " (test mode)" : ""}`)
 }
 
 export async function stopPeerServer(): Promise<void> {
   if (server) {
-    await server.close();
-    server = null;
+    await server.close()
+    server = null
   }
 }
 
 export function getInbox(): typeof _inbox {
-  return _inbox;
+  return _inbox
+}
+
+/**
+ * Process a raw UDP datagram as a P2PMessage.
+ * Returns true if the message was valid and handled, false otherwise.
+ */
+export function handleUdpMessage(data: Buffer, from: string): boolean {
+  let raw: any
+  try {
+    raw = JSON.parse(data.toString("utf-8"))
+  } catch {
+    return false
+  }
+
+  if (!raw || !raw.from || !raw.publicKey || !raw.event || !raw.signature) {
+    return false
+  }
+
+  if (agentIdFromPublicKey(raw.publicKey) !== raw.from) {
+    return false
+  }
+
+  if (raw.timestamp && Math.abs(Date.now() - raw.timestamp) > MAX_MESSAGE_AGE_MS) {
+    return false
+  }
+
+  const sigData = canonical(raw)
+  if (!verifySignature(raw.publicKey, sigData, raw.signature)) {
+    return false
+  }
+
+  if (!tofuVerifyAndCache(raw.from, raw.publicKey)) {
+    return false
+  }
+
+  const msg: P2PMessage = {
+    from: raw.from,
+    publicKey: raw.publicKey,
+    event: raw.event,
+    content: raw.content,
+    timestamp: raw.timestamp,
+    signature: raw.signature,
+  }
+
+  if (msg.event === "leave") {
+    removePeer(raw.from)
+    console.log(`[p2p] <- leave (UDP) from=${raw.from}`)
+    return true
+  }
+
+  const entry = { ...msg, verified: true, receivedAt: Date.now() }
+  _inbox.unshift(entry)
+  if (_inbox.length > 500) _inbox.pop()
+
+  console.log(`[p2p] <- verified (UDP) from=${raw.from}  event=${msg.event}`)
+  _handlers.forEach((h) => h(entry))
+  return true
 }

@@ -1,14 +1,13 @@
 /**
  * OpenClaw channel registration for DeClaw P2P messaging.
- * Registers "declaw" as a messaging channel so OpenClaw users can
- * chat directly with peers via the standard OpenClaw UI.
+ * Account IDs are agentIds.
  */
-import { Identity } from "./types";
-import { sendP2PMessage } from "./peer-client";
-import { listPeers, getPeerAddresses, upsertPeer } from "./peer-db";
-import { onMessage } from "./peer-server";
+import { Identity } from "./types"
+import { sendP2PMessage, SendOptions } from "./peer-client"
+import { listPeers, getPeerIds, getPeer } from "./peer-db"
+import { getEndpointAddress } from "./peer-db"
+import { onMessage } from "./peer-server"
 
-/** JSON Schema for channels.declaw — required for OpenClaw Control UI config form */
 export const CHANNEL_CONFIG_SCHEMA = {
   schema: {
     type: "object",
@@ -23,74 +22,76 @@ export const CHANNEL_CONFIG_SCHEMA = {
       allowFrom: {
         type: "array",
         items: { type: "string" },
-        description: "Yggdrasil IPv6 addresses allowed to DM (dmPolicy=allowlist)",
+        description: "Agent IDs allowed to DM (dmPolicy=allowlist)",
       },
     },
   },
   uiHints: {
     dmPolicy: {
       label: "DM Policy",
-      help: "open: anyone, pairing: one-time code, allowlist: specific Yggdrasil addresses only",
+      help: "open: anyone, pairing: one-time code, allowlist: specific agent IDs only",
     },
     allowFrom: {
       label: "Allow From",
-      help: "Yggdrasil IPv6 addresses permitted to send DMs (used when dmPolicy is allowlist)",
+      help: "Agent IDs permitted to send DMs",
     },
   },
 }
 
-export function buildChannel(identity: Identity, port: number) {
+export function buildChannel(identity: Identity, port: number, getSendOpts?: (id: string) => SendOptions) {
   return {
     id: "declaw",
     meta: {
       id: "declaw",
       label: "DeClaw",
-      selectionLabel: "DeClaw (Yggdrasil P2P)",
+      selectionLabel: "DeClaw (P2P)",
       docsPath: "/channels/declaw",
-      blurb: "Direct encrypted P2P messaging via Yggdrasil IPv6. No servers, no middlemen.",
+      blurb: "Direct encrypted P2P messaging. No servers, no middlemen.",
       aliases: ["p2p", "ygg", "yggdrasil", "ipv6-p2p"],
     },
     capabilities: { chatTypes: ["direct"] },
     configSchema: CHANNEL_CONFIG_SCHEMA,
     config: {
-      /** List all known peer Yggdrasil addresses as "account IDs". */
-      listAccountIds: (_cfg: unknown) => getPeerAddresses(),
-      /** Resolve an account ID (Ygg address) to an account config object. */
+      listAccountIds: (_cfg: unknown) => getPeerIds(),
       resolveAccount: (_cfg: unknown, accountId: string | undefined) => {
-        const addr = accountId ?? "";
-        const peer = listPeers().find((p) => p.yggAddr === addr);
-        return { accountId: addr, yggAddr: addr, alias: peer?.alias ?? addr };
+        const id = accountId ?? ""
+        const peer = getPeer(id)
+        return {
+          accountId: id,
+          agentId: peer?.agentId ?? id,
+          alias: peer?.alias ?? id,
+        }
       },
     },
     outbound: {
       deliveryMode: "direct" as const,
-      sendText: async ({ text, account }: { text: string; account: { yggAddr: string } }) => {
-        const result = await sendP2PMessage(identity, account.yggAddr, "chat", text, port);
+      sendText: async ({ text, account }: { text: string; account: { agentId?: string } }) => {
+        const agentId = account.agentId ?? ""
+        const peer = getPeer(agentId)
+        const targetAddr = (peer ? getEndpointAddress(peer, "yggdrasil") : null) ?? agentId
+        const opts = getSendOpts?.(agentId)
+        const result = await sendP2PMessage(identity, targetAddr, "chat", text, port, 10_000, opts)
         if (!result.ok) {
-          console.error(`[declaw] Failed to send to ${account.yggAddr}: ${result.error}`);
+          console.error(`[declaw] Failed to send to ${agentId}: ${result.error}`)
         }
-        return { ok: result.ok };
+        return { ok: result.ok }
       },
     },
-  };
+  }
 }
 
-/**
- * Wire incoming P2P messages to the OpenClaw gateway so they appear
- * in the conversation UI as incoming channel messages.
- */
 export function wireInboundToGateway(api: any): void {
   onMessage((msg) => {
-    if (msg.event !== "chat") return;
+    if (msg.event !== "chat") return
     try {
       api.gateway?.receiveChannelMessage?.({
         channelId: "declaw",
-        accountId: msg.fromYgg,
+        accountId: msg.from,
         text: msg.content,
-        senderId: msg.fromYgg,
-      });
+        senderId: msg.from,
+      })
     } catch {
-      console.log(`[declaw] Message from ${msg.fromYgg.slice(0, 20)}...: ${msg.content}`);
+      console.log(`[declaw] Message from ${msg.from}: ${msg.content}`)
     }
-  });
+  })
 }

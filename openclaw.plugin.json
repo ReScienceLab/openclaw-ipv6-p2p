@@ -20,7 +20,12 @@
       "peer_port": {
         "type": "integer",
         "default": 8099,
-        "description": "Local port for the P2P peer server"
+        "description": "Local port for the P2P peer server (HTTP)"
+      },
+      "quic_port": {
+        "type": "integer",
+        "default": 8098,
+        "description": "Local port for the QUIC/UDP transport (fallback when Yggdrasil is unavailable)"
       },
       "data_dir": {
         "type": "string",
@@ -73,8 +78,12 @@
       "placeholder": "Alice's coder"
     },
     "peer_port": {
-      "label": "Peer Server Port",
+      "label": "Peer Server Port (HTTP)",
       "placeholder": "8099"
+    },
+    "quic_port": {
+      "label": "QUIC Transport Port (UDP)",
+      "placeholder": "8098"
     },
     "data_dir": {
       "label": "Data Directory"
