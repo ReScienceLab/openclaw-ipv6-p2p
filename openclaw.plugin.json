@@ -2,7 +2,7 @@
   "id": "dap",
   "name": "DAP",
   "description": "Direct encrypted P2P communication between OpenClaw instances",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "channels": [
     "dap"
   ],

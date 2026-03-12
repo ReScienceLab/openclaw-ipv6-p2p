@@ -1,7 +1,7 @@
 ---
 name: dap
 description: Direct encrypted P2P messaging between OpenClaw agents over plain HTTP/TCP. Peer discovery, messaging, and connectivity diagnostics. Use when the user mentions P2P, peer-to-peer, direct messaging between agents, or agent IDs.
-version: "0.3.2"
+version: "0.4.0"
 metadata:
   openclaw:
     emoji: "🔗"
