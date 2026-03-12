@@ -1,0 +1,14 @@
+{
+  "name": "dap-world-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "DAP World Agent — standalone deployable world server",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "fastify": "^5.0.0",
+    "tweetnacl": "^1.0.3"
+  }
+}
