@@ -284,8 +284,11 @@ async function probeWorldReachable(peer) {
       const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
-        // If the ping response contains a worldId, verify it matches
-        if (data.worldId && expectedWorldId && data.worldId !== expectedWorldId) return false;
+        // World agents must return worldId in ping response
+        if (expectedWorldId) {
+          if (!data.worldId) return false; // not a world agent (e.g. gateway)
+          if (data.worldId !== expectedWorldId) return false; // port collision
+        }
         return true;
       }
     } catch {}
