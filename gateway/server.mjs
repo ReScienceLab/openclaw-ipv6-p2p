@@ -38,6 +38,7 @@ const PUBLIC_ADDR = process.env.PUBLIC_ADDR ?? null;
 const DATA_DIR = process.env.DATA_DIR ?? "/data";
 const BOOTSTRAP_URL = process.env.BOOTSTRAP_URL ?? "https://resciencelab.github.io/DAP/bootstrap.json";
 const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS ?? "60000");
+const STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(30 * 60 * 1000)); // 30 min
 const MAX_PEERS = 500;
 
 // ---------------------------------------------------------------------------
@@ -115,6 +116,15 @@ function upsertPeer(agentId, publicKey, opts = {}) {
     const oldest = [...peers.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0];
     peers.delete(oldest.agentId);
   }
+}
+
+function pruneStale(ttl = STALE_TTL_MS) {
+  const cutoff = Date.now() - ttl;
+  let pruned = 0;
+  for (const [id, p] of peers) {
+    if (p.lastSeen < cutoff) { peers.delete(id); pruned++; }
+  }
+  if (pruned > 0) console.log(`[gateway] Pruned ${pruned} stale peer(s) (TTL ${Math.round(ttl / 60000)}min)`);
 }
 
 function getPeersForExchange(limit = 50) {
@@ -251,12 +261,43 @@ async function announceToNode(addr, httpPort) {
   }
 }
 
+async function probeWorldReachable(world) {
+  if (!world.endpoints?.length) return false;
+  for (const ep of world.endpoints) {
+    try {
+      const addr = ep.address;
+      const port = ep.port ?? PEER_PORT;
+      const isIpv6 = addr.includes(":") && !addr.includes(".");
+      const url = isIpv6 ? `http://[${addr}]:${port}/peer/ping` : `http://${addr}:${port}/peer/ping`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.worldId && data.worldId !== world.worldId) return false;
+        return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
 async function discoverWorlds() {
   const nodes = await fetchBootstrapNodes();
   if (!nodes.length) { console.warn("[gateway] No bootstrap nodes found"); return; }
   await Promise.allSettled(nodes.map((n) => announceToNode(n.addr, n.httpPort)));
+
+  // Probe world endpoints and remove unreachable ones
   const worlds = findByCapability("world:");
-  console.log(`[gateway] Discovered ${worlds.length} world(s), ${peers.size} peers total`);
+  const results = await Promise.allSettled(worlds.map((w) => probeWorldReachable(w)));
+  let removed = 0;
+  for (let i = 0; i < worlds.length; i++) {
+    const reachable = results[i].status === "fulfilled" && results[i].value;
+    if (!reachable) {
+      peers.delete(worlds[i].agentId);
+      removed++;
+    }
+  }
+  const remaining = findByCapability("world:");
+  console.log(`[gateway] Discovered ${worlds.length} world(s), ${removed} unreachable removed, ${remaining.length} live, ${peers.size} peers total`);
 }
 
 // ---------------------------------------------------------------------------
@@ -434,3 +475,6 @@ console.log(`[gateway] Public HTTP on [::]:${HTTP_PORT}`);
 // Discovery
 setTimeout(discoverWorlds, 2_000);
 setInterval(discoverWorlds, DISCOVERY_INTERVAL_MS);
+
+// Prune stale peers every 5 minutes
+setInterval(() => pruneStale(), 5 * 60 * 1000);
