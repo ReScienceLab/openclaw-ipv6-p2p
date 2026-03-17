@@ -1,5 +1,5 @@
-export { agentIdFromPublicKey, canonicalize, verifySignature, signPayload, computeContentDigest, signHttpRequest, verifyHttpRequestHeaders } from "./crypto.js"
-export type { AwRequestHeaders } from "./crypto.js"
+export { agentIdFromPublicKey, canonicalize, verifySignature, signPayload, computeContentDigest, signHttpRequest, verifyHttpRequestHeaders, signHttpResponse, verifyHttpResponseHeaders } from "./crypto.js"
+export type { AwRequestHeaders, AwResponseHeaders } from "./crypto.js"
 export { loadOrCreateIdentity, deriveDidKey, toPublicKeyMultibase } from "./identity.js"
 export { buildSignedAgentCard } from "./card.js"
 export type { AgentCardOpts } from "./card.js"
@@ -16,4 +16,6 @@ export type {
   WorldConfig,
   WorldHooks,
   WorldServer,
+  KeyRotationRequest,
+  KeyRotationIdentity,
 } from "./types.js"

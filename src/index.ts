@@ -128,7 +128,7 @@ export default function register(api: any) {
         console.warn("[p2p] No QUIC transport available — HTTP-only mode")
       }
 
-      await startPeerServer(peerPort)
+      await startPeerServer(peerPort, { identity })
 
       setSelfMeta({
         agentId: identity.agentId,

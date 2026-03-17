@@ -151,3 +151,95 @@ export function verifyHttpRequestHeaders(
   const ok = verifySignature(publicKeyB64, signingInput, sig)
   return ok ? { ok: true } : { ok: false, error: "Invalid X-AgentWire-Signature" }
 }
+
+// ── AgentWire v0.2 HTTP response signing ─────────────────────────────────────
+
+export interface AwResponseHeaders {
+  "X-AgentWire-Version": string
+  "X-AgentWire-From": string
+  "X-AgentWire-KeyId": string
+  "X-AgentWire-Timestamp": string
+  "Content-Digest": string
+  "X-AgentWire-Signature": string
+}
+
+function buildResponseSigningInput(opts: {
+  from: string
+  kid: string
+  ts: string
+  status: number
+  contentDigest: string
+}): Record<string, unknown> {
+  return {
+    v: "0.2",
+    from: opts.from,
+    kid: opts.kid,
+    ts: opts.ts,
+    status: opts.status,
+    contentDigest: opts.contentDigest,
+  }
+}
+
+/**
+ * Produce AgentWire v0.2 HTTP response signing headers.
+ * Add to Fastify reply before sending the body.
+ */
+export function signHttpResponse(
+  identity: { agentId: string; secretKey: Uint8Array },
+  status: number,
+  body: string
+): AwResponseHeaders {
+  const ts = new Date().toISOString()
+  const kid = "#identity"
+  const contentDigest = computeContentDigest(body)
+  const signingInput = buildResponseSigningInput({
+    from: identity.agentId, kid, ts, status, contentDigest,
+  })
+  const sig = nacl.sign.detached(
+    Buffer.from(JSON.stringify(canonicalize(signingInput))),
+    identity.secretKey
+  )
+  return {
+    "X-AgentWire-Version": "0.2",
+    "X-AgentWire-From": identity.agentId,
+    "X-AgentWire-KeyId": kid,
+    "X-AgentWire-Timestamp": ts,
+    "Content-Digest": contentDigest,
+    "X-AgentWire-Signature": Buffer.from(sig).toString("base64"),
+  }
+}
+
+/**
+ * Verify AgentWire v0.2 HTTP response headers from an inbound response.
+ * Returns { ok: true } if valid, { ok: false, error } otherwise.
+ */
+export function verifyHttpResponseHeaders(
+  headers: Record<string, string | null>,
+  status: number,
+  body: string,
+  publicKeyB64: string
+): { ok: boolean; error?: string } {
+  const sig = headers["x-agentwire-signature"]
+  const from = headers["x-agentwire-from"]
+  const kid = headers["x-agentwire-keyid"]
+  const ts = headers["x-agentwire-timestamp"]
+  const cd = headers["content-digest"]
+
+  if (!sig || !from || !kid || !ts || !cd) {
+    return { ok: false, error: "Missing required AgentWire response headers" }
+  }
+
+  const tsDiff = Math.abs(Date.now() - new Date(ts).getTime())
+  if (isNaN(tsDiff) || tsDiff > MAX_CLOCK_SKEW_MS) {
+    return { ok: false, error: "X-AgentWire-Timestamp outside acceptable skew window" }
+  }
+
+  const expectedDigest = computeContentDigest(body)
+  if (cd !== expectedDigest) {
+    return { ok: false, error: "Content-Digest mismatch" }
+  }
+
+  const signingInput = buildResponseSigningInput({ from, kid, ts, status, contentDigest: cd })
+  const ok = verifySignature(publicKeyB64, signingInput, sig)
+  return ok ? { ok: true } : { ok: false, error: "Invalid X-AgentWire-Signature" }
+}
