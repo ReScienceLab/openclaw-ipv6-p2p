@@ -21,7 +21,18 @@ function load(): void {
   if (fs.existsSync(dbPath)) {
     try {
       const raw = JSON.parse(fs.readFileSync(dbPath, "utf-8"))
-      store = { version: 2, peers: raw.peers ?? {} }
+      const migrated: Record<string, DiscoveredPeerRecord> = {}
+      for (const [storedId, record] of Object.entries(raw.peers ?? {})) {
+        const r = record as DiscoveredPeerRecord
+        // Migrate legacy 32-char truncated agentIds → aw:sha256:<64hex>
+        if (/^[0-9a-f]{32}$/.test(storedId) && r.publicKey) {
+          const newId = agentIdFromPublicKey(r.publicKey)
+          migrated[newId] = { ...r, agentId: newId }
+        } else {
+          migrated[storedId] = r
+        }
+      }
+      store = { version: 2, peers: migrated }
     } catch {
       store = { version: 2, peers: {} }
     }

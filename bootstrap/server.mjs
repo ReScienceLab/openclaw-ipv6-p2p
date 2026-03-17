@@ -73,8 +73,8 @@ function loadPeers() {
   try {
     const records = JSON.parse(fs.readFileSync(file, "utf8"));
     for (const r of records) {
-      // Migrate legacy records that used yggAddr as key
-      const id = r.agentId ?? (r.publicKey ? agentIdFromPublicKey(r.publicKey) : null);
+      // Always recompute agentId from publicKey to migrate legacy 32-char IDs
+      const id = r.publicKey ? agentIdFromPublicKey(r.publicKey) : r.agentId;
       if (!id) continue;
       peers.set(id, { ...r, agentId: id });
     }
