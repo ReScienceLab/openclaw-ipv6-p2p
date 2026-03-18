@@ -24,7 +24,9 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - run: npm ci
+      - run: npm --prefix packages/agent-world-sdk install
       - run: npm run build
+      - run: npm --prefix packages/agent-world-sdk run build
       - run: node --test test/*.test.mjs
 
       # Creates a "Version Packages" PR when changesets are pending,
