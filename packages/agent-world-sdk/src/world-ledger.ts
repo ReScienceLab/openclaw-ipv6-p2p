@@ -23,7 +23,8 @@ export class WorldLedger {
   private filePath: string
   private identity: Identity
   private worldId: string
-  private writeStream: fs.WriteStream | null = null
+  /** Number of raw lines that failed to parse on load (0 = clean) */
+  public corruptedLines = 0
 
   constructor(dataDir: string, worldId: string, identity: Identity) {
     this.filePath = path.join(dataDir, "world-ledger.jsonl")
@@ -39,12 +40,18 @@ export class WorldLedger {
     }
 
     const lines = fs.readFileSync(this.filePath, "utf8").trim().split("\n").filter(Boolean)
+    let corrupted = 0
     for (const line of lines) {
       try {
         this.entries.push(JSON.parse(line) as LedgerEntry)
       } catch {
-        // skip malformed lines
+        corrupted++
       }
+    }
+    this.corruptedLines = corrupted
+
+    if (corrupted > 0) {
+      console.warn(`[ledger] WARNING: ${corrupted} corrupted line(s) detected in ${this.filePath}`)
     }
 
     if (this.entries.length === 0) {
@@ -116,9 +123,12 @@ export class WorldLedger {
 
   /**
    * Derive agent summaries from the event log.
-   * Returns a map of agentId → summary with first/last seen, total actions, and online status.
+   *
+   * @param liveAgentIds  Optional set of agent IDs currently in the live session.
+   *                      When provided, `online` is true only if the agent is in this set.
+   *                      When omitted, `online` is derived from the event log (may be stale after restart).
    */
-  getAgentSummaries(): AgentSummary[] {
+  getAgentSummaries(liveAgentIds?: Set<string>): AgentSummary[] {
     const map = new Map<string, {
       agentId: string
       alias: string
@@ -156,6 +166,13 @@ export class WorldLedger {
       }
     }
 
+    // If live session info is available, use it as the source of truth for online status
+    if (liveAgentIds) {
+      for (const summary of map.values()) {
+        summary.online = liveAgentIds.has(summary.agentId)
+      }
+    }
+
     return [...map.values()].sort((a, b) => b.lastSeen - a.lastSeen)
   }
 
@@ -166,8 +183,18 @@ export class WorldLedger {
   verify(): { ok: boolean; errors: Array<{ seq: number; error: string }> } {
     const errors: Array<{ seq: number; error: string }> = []
 
+    // Detect corrupted/dropped lines from load
+    if (this.corruptedLines > 0) {
+      errors.push({ seq: -1, error: `${this.corruptedLines} corrupted line(s) dropped during load — possible data loss` })
+    }
+
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i]
+
+      // Detect seq gaps (entries dropped from middle of chain)
+      if (entry.seq !== i) {
+        errors.push({ seq: entry.seq, error: `seq gap: expected ${i}, got ${entry.seq}` })
+      }
 
       // Verify prevHash chain
       const expectedPrev = i === 0 ? ZERO_HASH : this.entries[i - 1].hash

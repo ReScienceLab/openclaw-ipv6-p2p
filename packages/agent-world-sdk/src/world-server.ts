@@ -191,6 +191,7 @@ export async function createWorldServer(
     if (query.agent_id) opts.agentId = query.agent_id;
     if (query.event) opts.event = query.event.split(",") as LedgerQueryOpts["event"];
     if (query.since) opts.since = parseInt(query.since);
+    if (query.until) opts.until = parseInt(query.until);
     if (query.limit) opts.limit = parseInt(query.limit);
     return {
       ok: true,
@@ -205,7 +206,7 @@ export async function createWorldServer(
     return {
       ok: true,
       worldId,
-      agents: ledger.getAgentSummaries(),
+      agents: ledger.getAgentSummaries(new Set(agentLastSeen.keys())),
     };
   });
 

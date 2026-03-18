@@ -208,4 +208,48 @@ describe("WorldLedger", () => {
     const uniqueHashes = new Set(hashes)
     assert.equal(uniqueHashes.size, hashes.length)
   })
+
+  it("verify() detects corrupted/truncated lines on load", () => {
+    const ledger1 = new WorldLedger(tmpDir, "test-world", identity)
+    ledger1.append("world.join", "aw:sha256:a1", "Bot1")
+    assert.equal(ledger1.length, 2)
+
+    // Append a corrupted line to the file
+    const filePath = path.join(tmpDir, "world-ledger.jsonl")
+    fs.appendFileSync(filePath, '{"broken":true, invalid json\n')
+
+    const ledger2 = new WorldLedger(tmpDir, "test-world", identity)
+    assert.equal(ledger2.corruptedLines, 1)
+    assert.equal(ledger2.length, 2) // corrupted line dropped
+
+    const result = ledger2.verify()
+    assert.equal(result.ok, false)
+    assert.ok(result.errors.some(e => e.error.includes("corrupted")))
+  })
+
+  it("getAgentSummaries() uses liveAgentIds to determine online status", () => {
+    const ledger = new WorldLedger(tmpDir, "test-world", identity)
+    const a1 = "aw:sha256:agent1"
+    const a2 = "aw:sha256:agent2"
+
+    ledger.append("world.join", a1, "Alpha")
+    ledger.append("world.join", a2, "Beta")
+
+    // Without liveAgentIds — both online from log
+    const all = ledger.getAgentSummaries()
+    assert.equal(all.find(s => s.agentId === a1).online, true)
+    assert.equal(all.find(s => s.agentId === a2).online, true)
+
+    // With liveAgentIds — only a1 is actually online
+    const live = new Set([a1])
+    const filtered = ledger.getAgentSummaries(live)
+    assert.equal(filtered.find(s => s.agentId === a1).online, true)
+    assert.equal(filtered.find(s => s.agentId === a2).online, false)
+
+    // After restart — empty live set
+    const empty = new Set()
+    const restarted = ledger.getAgentSummaries(empty)
+    assert.equal(restarted.find(s => s.agentId === a1).online, false)
+    assert.equal(restarted.find(s => s.agentId === a2).online, false)
+  })
 })
