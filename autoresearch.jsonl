@@ -3,3 +3,4 @@
 {"run":2,"commit":"6c30139","metric":2053,"metrics":{"dap_build_ms":1118,"dap_tests_ms":817,"pokemon_check_ms":62},"status":"keep","description":"normalize hosted manifest handling in SDK","timestamp":1773819111835,"segment":0}
 {"run":3,"commit":"6c30139","metric":2449,"metrics":{"dap_build_ms":1381,"dap_tests_ms":933,"pokemon_check_ms":43},"status":"discard","description":"doc + template manifest normalization (no perf gain)","timestamp":1773819295412,"segment":0}
 {"run":4,"commit":"920a78a","metric":1588,"metrics":{"dap_build_ms":940,"dap_tests_ms":570,"pokemon_check_ms":37},"status":"keep","description":"manifest docs/template overhaul + incremental builds","timestamp":1773819458699,"segment":0}
+{"run":5,"commit":"737c62d","metric":1336,"metrics":{"dap_build_ms":601,"dap_tests_ms":631,"pokemon_check_ms":47},"status":"keep","description":"localize manifest docs to English only","timestamp":1773819719880,"segment":0}
