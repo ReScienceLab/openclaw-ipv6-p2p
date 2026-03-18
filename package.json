@@ -35,7 +35,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "version": "changeset version && node scripts/sync-version.mjs",
-    "release": "npm run build && npm --prefix packages/agent-world-sdk run build && changeset publish && npm --prefix packages/agent-world-sdk publish --access public",
+    "release": "npm run build && npm --prefix packages/agent-world-sdk run build && changeset publish && cd packages/agent-world-sdk && npm publish --access public",
     "prepublishOnly": "npm run build"
   },
   "publishConfig": {
