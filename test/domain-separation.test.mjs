@@ -256,9 +256,10 @@ describe("Domain-Separated Signatures", () => {
 
   test("domain separators contain protocol version", () => {
     for (const [name, separator] of Object.entries(DOMAIN_SEPARATORS)) {
+      // Version format is major.minor (e.g., "0.4" from "0.4.3")
       assert.ok(
-        separator.includes("0.4.3") || separator.includes("v"),
-        `${name} separator should contain version`
+        separator.includes("0.4") || /\d+\.\d+/.test(separator),
+        `${name} separator should contain version (major.minor format)`
       );
     }
   });
