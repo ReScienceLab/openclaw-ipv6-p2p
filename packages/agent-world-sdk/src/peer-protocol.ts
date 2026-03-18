@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import { createHash } from "node:crypto"
 import { agentIdFromPublicKey, canonicalize, verifySignature, verifyHttpRequestHeaders, signHttpResponse } from "./crypto.js"
+import { PROTOCOL_VERSION } from "./version.js"
 import { buildSignedAgentCard } from "./card.js"
 import type { AgentCardOpts } from "./card.js"
 import type { Identity, KeyRotationRequest } from "./types.js"
@@ -37,7 +38,24 @@ export function registerPeerRoutes(
 ): void {
   const { identity, peerDb, pingExtra, onMessage, card } = opts
 
-  // Sign all /peer/* JSON responses (P2a — AgentWire v0.2 response signing)
+  // Custom JSON parser that preserves the raw body string for digest verification.
+  // The raw bytes are stored on req.rawBody so verifyHttpRequestHeaders can check
+  // Content-Digest against exactly what the sender transmitted.
+  fastify.decorateRequest("rawBody", "")
+  fastify.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (req, body, done) => {
+      try {
+        ;(req as unknown as { rawBody: string }).rawBody = body as string
+        done(null, JSON.parse(body as string))
+      } catch (err) {
+        done(err as Error, undefined)
+      }
+    }
+  )
+
+  // Sign all /peer/* JSON responses (P2a — AgentWorld v0.2 response signing)
   fastify.addHook("onSend", async (_req, reply, payload) => {
     if (typeof payload !== "string") return payload
     const url = (_req.url ?? "").split("?")[0]
@@ -84,9 +102,9 @@ export function registerPeerRoutes(
       return reply.code(400).send({ error: "Invalid announce" })
     }
 
-    const awSig = req.headers["x-agentwire-signature"]
+    const awSig = req.headers["x-agentworld-signature"]
     if (awSig) {
-      const rawBody = JSON.stringify(canonicalize(ann))
+      const rawBody = (req as unknown as { rawBody: string }).rawBody
       const authority = (req.headers["host"] as string) ?? "localhost"
       const result = verifyHttpRequestHeaders(
         req.headers as Record<string, string>,
@@ -117,9 +135,9 @@ export function registerPeerRoutes(
       return reply.code(400).send({ error: "Invalid message" })
     }
 
-    const awSig = req.headers["x-agentwire-signature"]
+    const awSig = req.headers["x-agentworld-signature"]
     if (awSig) {
-      const rawBody = JSON.stringify(canonicalize(msg))
+      const rawBody = (req as unknown as { rawBody: string }).rawBody
       const authority = (req.headers["host"] as string) ?? "localhost"
       const result = verifyHttpRequestHeaders(
         req.headers as Record<string, string>,
@@ -168,20 +186,22 @@ export function registerPeerRoutes(
     }
   })
 
-  // POST /peer/key-rotation — AgentWire v0.2 §6.10/§10.4
+  // POST /peer/key-rotation — AgentWorld v0.2 §6.10/§10.4
   fastify.post("/peer/key-rotation", async (req, reply) => {
     const rot = req.body as unknown as KeyRotationRequest
 
-    if (rot?.type !== "key-rotation" || rot?.version !== "0.2") {
-      return reply.code(400).send({ error: "Expected type=key-rotation and version=0.2" })
+    if (rot?.type !== "agentworld-identity-rotation" || rot?.version !== PROTOCOL_VERSION) {
+      return reply.code(400).send({ error: `Expected type=agentworld-identity-rotation and version=${PROTOCOL_VERSION}` })
     }
 
-    if (!rot.oldIdentity?.agentId || !rot.oldIdentity?.publicKeyMultibase ||
-        !rot.newIdentity?.publicKeyMultibase || !rot.proofs?.signedByOld || !rot.proofs?.signedByNew) {
+    if (!rot.oldAgentId || !rot.newAgentId ||
+        !rot.oldIdentity?.publicKeyMultibase ||
+        !rot.newIdentity?.publicKeyMultibase ||
+        !rot.proofs?.signedByOld?.signature || !rot.proofs?.signedByNew?.signature) {
       return reply.code(400).send({ error: "Missing required key rotation fields" })
     }
 
-    const agentId = rot.oldIdentity.agentId
+    const agentId = rot.oldAgentId
     let oldPublicKeyB64: string, newPublicKeyB64: string
     try {
       oldPublicKeyB64 = multibaseToBase64(rot.oldIdentity.publicKeyMultibase)
@@ -206,10 +226,10 @@ export function registerPeerRoutes(
       newPublicKey: newPublicKeyB64,
       timestamp,
     }
-    if (!verifySignature(oldPublicKeyB64, signable, rot.proofs.signedByOld)) {
+    if (!verifySignature(oldPublicKeyB64, signable, rot.proofs.signedByOld.signature)) {
       return reply.code(403).send({ error: "Invalid signatureByOldKey" })
     }
-    if (!verifySignature(newPublicKeyB64, signable, rot.proofs.signedByNew)) {
+    if (!verifySignature(newPublicKeyB64, signable, rot.proofs.signedByNew.signature)) {
       return reply.code(403).send({ error: "Invalid signatureByNewKey" })
     }
 

@@ -1,8 +1,8 @@
 /**
- * P2a — AgentWire v0.2 response signing
+ * P2a — AgentWorld v0.2 response signing
  *
- * Verifies that /peer/* endpoints include X-AgentWire-Signature,
- * X-AgentWire-From, Content-Digest and other required headers, and that
+ * Verifies that /peer/* endpoints include X-AgentWorld-Signature,
+ * X-AgentWorld-From, Content-Digest and other required headers, and that
  * the signature is cryptographically valid over the response body.
  */
 import { test, describe, before, after } from "node:test"
@@ -11,6 +11,10 @@ import * as os from "node:os"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import crypto from "node:crypto"
+
+import { createRequire } from "node:module"
+const require = createRequire(import.meta.url)
+const { version: PROTOCOL_VERSION } = require("../package.json")
 
 const nacl = (await import("tweetnacl")).default
 
@@ -44,10 +48,10 @@ function canonicalize(value) {
 }
 
 function verifyResponseSig(headers, status, body, publicKeyB64) {
-  const sig = headers.get("x-agentwire-signature")
-  const from = headers.get("x-agentwire-from")
-  const kid = headers.get("x-agentwire-keyid")
-  const ts = headers.get("x-agentwire-timestamp")
+  const sig = headers.get("x-agentworld-signature")
+  const from = headers.get("x-agentworld-from")
+  const kid = headers.get("x-agentworld-keyid")
+  const ts = headers.get("x-agentworld-timestamp")
   const cd = headers.get("content-digest")
 
   if (!sig || !from || !kid || !ts || !cd) return { ok: false, missing: true }
@@ -55,7 +59,7 @@ function verifyResponseSig(headers, status, body, publicKeyB64) {
   const expectedDigest = computeContentDigest(body)
   if (cd !== expectedDigest) return { ok: false, digestMismatch: true }
 
-  const signingInput = canonicalize({ v: "0.2", from, kid, ts, status, contentDigest: cd })
+  const signingInput = canonicalize({ v: PROTOCOL_VERSION, from, kid, ts, status, contentDigest: cd })
   const pubBytes = Buffer.from(publicKeyB64, "base64")
   const sigBytes = Buffer.from(sig, "base64")
   const msg = Buffer.from(JSON.stringify(signingInput))
@@ -79,22 +83,22 @@ describe("P2a — response signing on /peer/* endpoints", () => {
     fs.rmSync(tmpDir, { recursive: true })
   })
 
-  test("/peer/ping response has valid AgentWire signature headers", async () => {
+  test("/peer/ping response has valid AgentWorld signature headers", async () => {
     const resp = await fetch(`http://[::1]:${PORT}/peer/ping`)
     const body = await resp.text()
     assert.equal(resp.status, 200)
 
-    assert.ok(resp.headers.get("x-agentwire-signature"), "missing X-AgentWire-Signature")
-    assert.ok(resp.headers.get("x-agentwire-from"), "missing X-AgentWire-From")
-    assert.ok(resp.headers.get("x-agentwire-keyid"), "missing X-AgentWire-KeyId")
-    assert.ok(resp.headers.get("x-agentwire-timestamp"), "missing X-AgentWire-Timestamp")
+    assert.ok(resp.headers.get("x-agentworld-signature"), "missing X-AgentWorld-Signature")
+    assert.ok(resp.headers.get("x-agentworld-from"), "missing X-AgentWorld-From")
+    assert.ok(resp.headers.get("x-agentworld-keyid"), "missing X-AgentWorld-KeyId")
+    assert.ok(resp.headers.get("x-agentworld-timestamp"), "missing X-AgentWorld-Timestamp")
     assert.ok(resp.headers.get("content-digest"), "missing Content-Digest")
 
     const result = verifyResponseSig(resp.headers, 200, body, selfKey.publicKey)
     assert.ok(result.ok, `Response signature invalid: ${JSON.stringify(result)}`)
   })
 
-  test("/peer/peers response has valid AgentWire signature headers", async () => {
+  test("/peer/peers response has valid AgentWorld signature headers", async () => {
     const resp = await fetch(`http://[::1]:${PORT}/peer/peers`)
     const body = await resp.text()
     assert.equal(resp.status, 200)

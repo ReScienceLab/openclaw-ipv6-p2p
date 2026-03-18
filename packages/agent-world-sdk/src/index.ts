@@ -1,3 +1,4 @@
+export { PROTOCOL_VERSION } from "./version.js"
 export { agentIdFromPublicKey, canonicalize, verifySignature, signPayload, computeContentDigest, signHttpRequest, verifyHttpRequestHeaders, signHttpResponse, verifyHttpResponseHeaders } from "./crypto.js"
 export type { AwRequestHeaders, AwResponseHeaders } from "./crypto.js"
 export { loadOrCreateIdentity, deriveDidKey, toPublicKeyMultibase } from "./identity.js"

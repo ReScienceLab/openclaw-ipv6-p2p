@@ -35,7 +35,7 @@ const tofuCache = new Map();  // agentId -> publicKey b64
 // Crypto helpers
 // ---------------------------------------------------------------------------
 
-/** Derive agentId from a base64 Ed25519 public key — AgentWire v0.2 aw:sha256: format */
+/** Derive agentId from a base64 Ed25519 public key — AgentWorld v0.2 aw:sha256: format */
 function agentIdFromPublicKey(publicKeyB64) {
   const pubBytes = Buffer.from(publicKeyB64, "base64");
   return `aw:sha256:${crypto.createHash("sha256").update(pubBytes).digest("hex")}`;

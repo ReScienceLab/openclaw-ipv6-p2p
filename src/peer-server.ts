@@ -13,6 +13,8 @@ import { createHash } from "node:crypto"
 import * as nacl from "tweetnacl"
 import { P2PMessage, Endpoint } from "./types"
 import { verifySignature, agentIdFromPublicKey, canonicalize } from "./identity"
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { version: PROTOCOL_VERSION } = require("../package.json")
 import { tofuVerifyAndCache, tofuReplaceKey, getPeersForExchange, upsertDiscoveredPeer, removePeer, getPeer } from "./peer-db"
 
 const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000 // 5 minutes
@@ -72,7 +74,7 @@ function signResponse(status: number, bodyStr: string): Record<string, string> |
   const kid = "#identity"
   const contentDigest = computeContentDigest(bodyStr)
   const signingInput = canonicalize({
-    v: "0.2",
+    v: PROTOCOL_VERSION,
     from: _signingKey.agentId,
     kid,
     ts,
@@ -84,12 +86,12 @@ function signResponse(status: number, bodyStr: string): Record<string, string> |
     _signingKey.secretKey
   )
   return {
-    "X-AgentWire-Version": "0.2",
-    "X-AgentWire-From": _signingKey.agentId,
-    "X-AgentWire-KeyId": kid,
-    "X-AgentWire-Timestamp": ts,
+    "X-AgentWorld-Version": PROTOCOL_VERSION,
+    "X-AgentWorld-From": _signingKey.agentId,
+    "X-AgentWorld-KeyId": kid,
+    "X-AgentWorld-Timestamp": ts,
     "Content-Digest": contentDigest,
-    "X-AgentWire-Signature": Buffer.from(sig).toString("base64"),
+    "X-AgentWorld-Signature": Buffer.from(sig).toString("base64"),
   }
 }
 
@@ -102,7 +104,7 @@ export async function startPeerServer(port: number = 8099, opts?: PeerServerOpti
 
   server = Fastify({ logger: false })
 
-  // Sign all /peer/* JSON responses (P2a — AgentWire v0.2 response signing)
+  // Sign all /peer/* JSON responses (P2a — AgentWorld v0.2 response signing)
   server.addHook("onSend", async (_req, reply, payload) => {
     if (!_signingKey || typeof payload !== "string") return payload
     const url = ((_req as any).url ?? "").split("?")[0] as string
@@ -225,16 +227,18 @@ export async function startPeerServer(port: number = 8099, opts?: PeerServerOpti
   server.post("/peer/key-rotation", async (req, reply) => {
     const rot = req.body as any
 
-    if (!rot.oldIdentity?.agentId || !rot.oldIdentity?.publicKeyMultibase ||
-        !rot.newIdentity?.publicKeyMultibase || !rot.proofs?.signedByOld || !rot.proofs?.signedByNew) {
+    if (!rot.oldAgentId || !rot.newAgentId ||
+        !rot.oldIdentity?.publicKeyMultibase ||
+        !rot.newIdentity?.publicKeyMultibase ||
+        !rot.proofs?.signedByOld?.signature || !rot.proofs?.signedByNew?.signature) {
       return reply.code(400).send({ error: "Missing required key rotation fields" })
     }
 
-    if (rot.type !== "key-rotation" || rot.version !== "0.2") {
-      return reply.code(400).send({ error: "Expected type=key-rotation and version=0.2" })
+    if (rot.type !== "agentworld-identity-rotation" || rot.version !== PROTOCOL_VERSION) {
+      return reply.code(400).send({ error: `Expected type=agentworld-identity-rotation and version=${PROTOCOL_VERSION}` })
     }
 
-    const agentId: string = rot.oldIdentity.agentId
+    const agentId: string = rot.oldAgentId
     let oldPublicKeyB64: string, newPublicKeyB64: string
     try {
       oldPublicKeyB64 = multibaseToBase64(rot.oldIdentity.publicKeyMultibase)
@@ -259,11 +263,11 @@ export async function startPeerServer(port: number = 8099, opts?: PeerServerOpti
       timestamp,
     }
 
-    if (!verifySignature(oldPublicKeyB64, signable, rot.proofs.signedByOld)) {
+    if (!verifySignature(oldPublicKeyB64, signable, rot.proofs.signedByOld.signature)) {
       return reply.code(403).send({ error: "Invalid signatureByOldKey" })
     }
 
-    if (!verifySignature(newPublicKeyB64, signable, rot.proofs.signedByNew)) {
+    if (!verifySignature(newPublicKeyB64, signable, rot.proofs.signedByNew.signature)) {
       return reply.code(403).send({ error: "Invalid signatureByNewKey" })
     }
 

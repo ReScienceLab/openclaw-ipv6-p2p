@@ -1,5 +1,6 @@
 import crypto from "node:crypto"
 import nacl from "tweetnacl"
+import { PROTOCOL_VERSION } from "./version.js"
 
 export function agentIdFromPublicKey(publicKeyB64: string): string {
   const fullHex = crypto.createHash("sha256")
@@ -39,7 +40,7 @@ export function signPayload(payload: unknown, secretKey: Uint8Array): string {
   return Buffer.from(sig).toString("base64")
 }
 
-// ── AgentWire v0.2 HTTP header signing ───────────────────────────────────────
+// ── AgentWorld v0.2 HTTP header signing ───────────────────────────────────────
 
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000
 
@@ -49,12 +50,12 @@ export function computeContentDigest(body: string): string {
 }
 
 export interface AwRequestHeaders {
-  "X-AgentWire-Version": string
-  "X-AgentWire-From": string
-  "X-AgentWire-KeyId": string
-  "X-AgentWire-Timestamp": string
+  "X-AgentWorld-Version": string
+  "X-AgentWorld-From": string
+  "X-AgentWorld-KeyId": string
+  "X-AgentWorld-Timestamp": string
   "Content-Digest": string
-  "X-AgentWire-Signature": string
+  "X-AgentWorld-Signature": string
 }
 
 function buildRequestSigningInput(opts: {
@@ -67,7 +68,7 @@ function buildRequestSigningInput(opts: {
   contentDigest: string
 }): Record<string, string> {
   return {
-    v: "0.2",
+    v: PROTOCOL_VERSION,
     from: opts.from,
     kid: opts.kid,
     ts: opts.ts,
@@ -79,7 +80,7 @@ function buildRequestSigningInput(opts: {
 }
 
 /**
- * Produce AgentWire v0.2 HTTP request signing headers.
+ * Produce AgentWorld v0.2 HTTP request signing headers.
  * Include alongside Content-Type in outbound fetch calls.
  */
 export function signHttpRequest(
@@ -100,17 +101,17 @@ export function signHttpRequest(
     identity.secretKey
   )
   return {
-    "X-AgentWire-Version": "0.2",
-    "X-AgentWire-From": identity.agentId,
-    "X-AgentWire-KeyId": kid,
-    "X-AgentWire-Timestamp": ts,
+    "X-AgentWorld-Version": PROTOCOL_VERSION,
+    "X-AgentWorld-From": identity.agentId,
+    "X-AgentWorld-KeyId": kid,
+    "X-AgentWorld-Timestamp": ts,
     "Content-Digest": contentDigest,
-    "X-AgentWire-Signature": Buffer.from(sig).toString("base64"),
+    "X-AgentWorld-Signature": Buffer.from(sig).toString("base64"),
   }
 }
 
 /**
- * Verify AgentWire v0.2 HTTP request headers.
+ * Verify AgentWorld v0.2 HTTP request headers.
  * Returns { ok: true } if valid, { ok: false, error } otherwise.
  */
 export function verifyHttpRequestHeaders(
@@ -125,19 +126,19 @@ export function verifyHttpRequestHeaders(
   const h: Record<string, string | string[] | undefined> = {}
   for (const [k, v] of Object.entries(headers)) h[k.toLowerCase()] = v
 
-  const sig = h["x-agentwire-signature"] as string | undefined
-  const from = h["x-agentwire-from"] as string | undefined
-  const kid = h["x-agentwire-keyid"] as string | undefined
-  const ts = h["x-agentwire-timestamp"] as string | undefined
+  const sig = h["x-agentworld-signature"] as string | undefined
+  const from = h["x-agentworld-from"] as string | undefined
+  const kid = h["x-agentworld-keyid"] as string | undefined
+  const ts = h["x-agentworld-timestamp"] as string | undefined
   const cd = h["content-digest"] as string | undefined
 
   if (!sig || !from || !kid || !ts || !cd) {
-    return { ok: false, error: "Missing required AgentWire headers" }
+    return { ok: false, error: "Missing required AgentWorld headers" }
   }
 
   const tsDiff = Math.abs(Date.now() - new Date(ts).getTime())
   if (isNaN(tsDiff) || tsDiff > MAX_CLOCK_SKEW_MS) {
-    return { ok: false, error: "X-AgentWire-Timestamp outside acceptable skew window" }
+    return { ok: false, error: "X-AgentWorld-Timestamp outside acceptable skew window" }
   }
 
   const expectedDigest = computeContentDigest(body)
@@ -149,18 +150,18 @@ export function verifyHttpRequestHeaders(
     from, kid, ts, method, authority, path, contentDigest: cd,
   })
   const ok = verifySignature(publicKeyB64, signingInput, sig)
-  return ok ? { ok: true } : { ok: false, error: "Invalid X-AgentWire-Signature" }
+  return ok ? { ok: true } : { ok: false, error: "Invalid X-AgentWorld-Signature" }
 }
 
-// ── AgentWire v0.2 HTTP response signing ─────────────────────────────────────
+// ── AgentWorld v0.2 HTTP response signing ─────────────────────────────────────
 
 export interface AwResponseHeaders {
-  "X-AgentWire-Version": string
-  "X-AgentWire-From": string
-  "X-AgentWire-KeyId": string
-  "X-AgentWire-Timestamp": string
+  "X-AgentWorld-Version": string
+  "X-AgentWorld-From": string
+  "X-AgentWorld-KeyId": string
+  "X-AgentWorld-Timestamp": string
   "Content-Digest": string
-  "X-AgentWire-Signature": string
+  "X-AgentWorld-Signature": string
 }
 
 function buildResponseSigningInput(opts: {
@@ -171,7 +172,7 @@ function buildResponseSigningInput(opts: {
   contentDigest: string
 }): Record<string, unknown> {
   return {
-    v: "0.2",
+    v: PROTOCOL_VERSION,
     from: opts.from,
     kid: opts.kid,
     ts: opts.ts,
@@ -181,7 +182,7 @@ function buildResponseSigningInput(opts: {
 }
 
 /**
- * Produce AgentWire v0.2 HTTP response signing headers.
+ * Produce AgentWorld v0.2 HTTP response signing headers.
  * Add to Fastify reply before sending the body.
  */
 export function signHttpResponse(
@@ -200,17 +201,17 @@ export function signHttpResponse(
     identity.secretKey
   )
   return {
-    "X-AgentWire-Version": "0.2",
-    "X-AgentWire-From": identity.agentId,
-    "X-AgentWire-KeyId": kid,
-    "X-AgentWire-Timestamp": ts,
+    "X-AgentWorld-Version": PROTOCOL_VERSION,
+    "X-AgentWorld-From": identity.agentId,
+    "X-AgentWorld-KeyId": kid,
+    "X-AgentWorld-Timestamp": ts,
     "Content-Digest": contentDigest,
-    "X-AgentWire-Signature": Buffer.from(sig).toString("base64"),
+    "X-AgentWorld-Signature": Buffer.from(sig).toString("base64"),
   }
 }
 
 /**
- * Verify AgentWire v0.2 HTTP response headers from an inbound response.
+ * Verify AgentWorld v0.2 HTTP response headers from an inbound response.
  * Returns { ok: true } if valid, { ok: false, error } otherwise.
  */
 export function verifyHttpResponseHeaders(
@@ -223,19 +224,19 @@ export function verifyHttpResponseHeaders(
   const h: Record<string, string | null> = {}
   for (const [k, v] of Object.entries(headers)) h[k.toLowerCase()] = v
 
-  const sig = h["x-agentwire-signature"]
-  const from = h["x-agentwire-from"]
-  const kid = h["x-agentwire-keyid"]
-  const ts = h["x-agentwire-timestamp"]
+  const sig = h["x-agentworld-signature"]
+  const from = h["x-agentworld-from"]
+  const kid = h["x-agentworld-keyid"]
+  const ts = h["x-agentworld-timestamp"]
   const cd = h["content-digest"]
 
   if (!sig || !from || !kid || !ts || !cd) {
-    return { ok: false, error: "Missing required AgentWire response headers" }
+    return { ok: false, error: "Missing required AgentWorld response headers" }
   }
 
   const tsDiff = Math.abs(Date.now() - new Date(ts).getTime())
   if (isNaN(tsDiff) || tsDiff > MAX_CLOCK_SKEW_MS) {
-    return { ok: false, error: "X-AgentWire-Timestamp outside acceptable skew window" }
+    return { ok: false, error: "X-AgentWorld-Timestamp outside acceptable skew window" }
   }
 
   const expectedDigest = computeContentDigest(body)
@@ -245,5 +246,5 @@ export function verifyHttpResponseHeaders(
 
   const signingInput = buildResponseSigningInput({ from, kid, ts, status, contentDigest: cd })
   const ok = verifySignature(publicKeyB64, signingInput, sig)
-  return ok ? { ok: true } : { ok: false, error: "Invalid X-AgentWire-Signature" }
+  return ok ? { ok: true } : { ok: false, error: "Invalid X-AgentWorld-Signature" }
 }

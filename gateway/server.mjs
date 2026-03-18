@@ -292,6 +292,16 @@ async function discoverWorlds() {
 async function startPeerListener() {
   const peerServer = Fastify({ logger: false });
 
+  // Preserve raw request body for Content-Digest verification
+  peerServer.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => {
+    try {
+      req.rawBody = body;
+      done(null, JSON.parse(body));
+    } catch (err) {
+      done(err, undefined);
+    }
+  });
+
   peerServer.get("/peer/ping", async () => ({ ok: true, ts: Date.now(), role: "gateway" }));
   peerServer.get("/peer/peers", async () => ({ peers: getPeersForExchange() }));
 
@@ -299,11 +309,10 @@ async function startPeerListener() {
     const ann = req.body;
     if (!ann?.publicKey || !ann?.from) return reply.code(400).send({ error: "Invalid announce" });
 
-    const awSig = req.headers["x-agentwire-signature"];
+    const awSig = req.headers["x-agentworld-signature"];
     if (awSig) {
-      const rawBody = JSON.stringify(canonicalize(ann));
       const authority = req.headers["host"] ?? "localhost";
-      const result = verifyHttpRequestHeaders(req.headers, req.method, req.url, authority, rawBody, ann.publicKey);
+      const result = verifyHttpRequestHeaders(req.headers, req.method, req.url, authority, req.rawBody, ann.publicKey);
       if (!result.ok) return reply.code(403).send({ error: result.error });
     } else {
       const { signature, ...signable } = ann;
@@ -325,11 +334,10 @@ async function startPeerListener() {
     const msg = req.body;
     if (!msg?.publicKey || !msg?.from) return reply.code(400).send({ error: "Invalid message" });
 
-    const awSig = req.headers["x-agentwire-signature"];
+    const awSig = req.headers["x-agentworld-signature"];
     if (awSig) {
-      const rawBody = JSON.stringify(canonicalize(msg));
       const authority = req.headers["host"] ?? "localhost";
-      const result = verifyHttpRequestHeaders(req.headers, req.method, req.url, authority, rawBody, msg.publicKey);
+      const result = verifyHttpRequestHeaders(req.headers, req.method, req.url, authority, req.rawBody, msg.publicKey);
       if (!result.ok) return reply.code(403).send({ error: result.error });
     } else {
       const { signature, ...signable } = msg;

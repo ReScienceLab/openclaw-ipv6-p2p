@@ -6,6 +6,10 @@ import * as path from "node:path"
 
 const nacl = (await import("tweetnacl")).default
 
+import { createRequire } from "node:module"
+const require = createRequire(import.meta.url)
+const { version: PROTOCOL_VERSION } = require("../package.json")
+
 const { startPeerServer, stopPeerServer } = await import("../dist/peer-server.js")
 const { initDb } = await import("../dist/peer-db.js")
 const { signMessage, agentIdFromPublicKey } = await import("../dist/identity.js")
@@ -46,6 +50,12 @@ function pubToMultibase(pubB64) {
   return `z${str}`
 }
 
+function makeProof(kid, privB64, signable) {
+  const header = JSON.stringify({ alg: "EdDSA", kid })
+  const protectedB64 = Buffer.from(header).toString("base64url")
+  return { protected: protectedB64, signature: sign(privB64, signable) }
+}
+
 function makeRotationBody(oldKey, newKey, overrideProofOld) {
   const signable = {
     agentId: oldKey.agentId,
@@ -54,14 +64,16 @@ function makeRotationBody(oldKey, newKey, overrideProofOld) {
     timestamp: Date.now(),
   }
   return {
-    type: "key-rotation",
-    version: "0.2",
+    type: "agentworld-identity-rotation",
+    version: PROTOCOL_VERSION,
+    oldAgentId: oldKey.agentId,
+    newAgentId: newKey.agentId,
     oldIdentity: { agentId: oldKey.agentId, kid: "#identity", publicKeyMultibase: pubToMultibase(oldKey.publicKey) },
     newIdentity: { agentId: newKey.agentId, kid: "#identity", publicKeyMultibase: pubToMultibase(newKey.publicKey) },
     timestamp: signable.timestamp,
     proofs: {
-      signedByOld: sign(overrideProofOld ?? oldKey.privateKey, signable),
-      signedByNew: sign(newKey.privateKey, signable),
+      signedByOld: makeProof("#identity", overrideProofOld ?? oldKey.privateKey, signable),
+      signedByNew: makeProof("#identity", newKey.privateKey, signable),
     },
   }
 }
@@ -107,7 +119,7 @@ describe("key rotation endpoint", () => {
     assert.equal(resp.status, 403)
   })
 
-  test("rejects mismatched agentId (oldIdentity.agentId does not match oldPublicKey)", async () => {
+  test("rejects mismatched agentId (oldAgentId does not match oldPublicKey)", async () => {
     const oldKey = makeKeypair()
     const newKey = makeKeypair()
     const otherKey = makeKeypair()
@@ -118,14 +130,16 @@ describe("key rotation endpoint", () => {
       timestamp: Date.now(),
     }
     const body = {
-      type: "key-rotation",
-      version: "0.2",
+      type: "agentworld-identity-rotation",
+      version: PROTOCOL_VERSION,
+      oldAgentId: otherKey.agentId,
+      newAgentId: newKey.agentId,
       oldIdentity: { agentId: otherKey.agentId, kid: "#identity", publicKeyMultibase: pubToMultibase(oldKey.publicKey) },
       newIdentity: { agentId: newKey.agentId, kid: "#identity", publicKeyMultibase: pubToMultibase(newKey.publicKey) },
       timestamp: signable.timestamp,
       proofs: {
-        signedByOld: sign(oldKey.privateKey, signable),
-        signedByNew: sign(newKey.privateKey, signable),
+        signedByOld: makeProof("#identity", oldKey.privateKey, signable),
+        signedByNew: makeProof("#identity", newKey.privateKey, signable),
       },
     }
     const resp = await fetch(`http://[::1]:${port}/peer/key-rotation`, {
@@ -140,7 +154,7 @@ describe("key rotation endpoint", () => {
     const resp = await fetch(`http://[::1]:${port}/peer/key-rotation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "key-rotation", version: "0.2" }),
+      body: JSON.stringify({ type: "agentworld-identity-rotation", version: PROTOCOL_VERSION }),
     })
     assert.equal(resp.status, 400)
   })
@@ -149,7 +163,7 @@ describe("key rotation endpoint", () => {
     const resp = await fetch(`http://[::1]:${port}/peer/key-rotation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agentId: "x", oldPublicKey: "x", newPublicKey: "x" }),
+      body: JSON.stringify({ type: "key-rotation", version: PROTOCOL_VERSION, oldAgentId: "x" }),
     })
     assert.equal(resp.status, 400)
   })
@@ -182,8 +196,10 @@ describe("key rotation endpoint", () => {
       timestamp: Date.now(),
     }
     const body = {
-      type: "key-rotation",
-      version: "0.2",
+      type: "agentworld-identity-rotation",
+      version: PROTOCOL_VERSION,
+      oldAgentId: tofuKey.agentId,
+      newAgentId: newKey.agentId,
       oldIdentity: {
         agentId: tofuKey.agentId,
         kid: "#identity",
@@ -192,8 +208,8 @@ describe("key rotation endpoint", () => {
       newIdentity: { agentId: newKey.agentId, kid: "#identity", publicKeyMultibase: pubToMultibase(newKey.publicKey) },
       timestamp: signable.timestamp,
       proofs: {
-        signedByOld: sign(attackerKey.privateKey, signable),
-        signedByNew: sign(newKey.privateKey, signable),
+        signedByOld: makeProof("#identity", attackerKey.privateKey, signable),
+        signedByNew: makeProof("#identity", newKey.privateKey, signable),
       },
     }
     const resp = await fetch(`http://[::1]:${port}/peer/key-rotation`, {

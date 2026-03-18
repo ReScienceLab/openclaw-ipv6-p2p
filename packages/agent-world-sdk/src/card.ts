@@ -1,8 +1,8 @@
 /**
- * AgentWire v0.2 Agent Card builder.
+ * AgentWorld v0.2 Agent Card builder.
  *
  * Builds and JWS-signs a standard A2A-compatible Agent Card with an
- * `extensions.agentwire` block. The card is served at /.well-known/agent.json.
+ * `extensions.agentworld` block. The card is served at /.well-known/agent.json.
  *
  * Signing uses jose FlattenedSign (EdDSA/Ed25519). The `payload` field is
  * omitted from the stored signature entry — the card body itself is the
@@ -12,6 +12,7 @@ import { FlattenedSign } from "jose"
 import { createPrivateKey } from "node:crypto"
 import { canonicalize } from "./crypto.js"
 import { deriveDidKey, toPublicKeyMultibase } from "./identity.js"
+import { PROTOCOL_VERSION } from "./version.js"
 import type { Identity } from "./types.js"
 
 // PKCS8 DER header for an Ed25519 32-byte seed (RFC 8410)
@@ -31,7 +32,7 @@ export interface AgentCardOpts {
   cardUrl: string
   /** A2A JSON-RPC endpoint URL (optional) */
   rpcUrl?: string
-  /** AgentWire profiles to declare. Defaults to ["core/v0.2"] */
+  /** AgentWorld profiles to declare. Defaults to ["core/v0.2"] */
   profiles?: string[]
   /** Conformance node class. Defaults to "CoreNode" */
   nodeClass?: string
@@ -40,7 +41,7 @@ export interface AgentCardOpts {
 }
 
 /**
- * Build and JWS-sign an AgentWire v0.2 Agent Card.
+ * Build and JWS-sign an AgentWorld v0.2 Agent Card.
  *
  * Returns the canonical JSON string that MUST be served verbatim as
  * `application/json`. The JWS signature covers
@@ -63,8 +64,8 @@ export async function buildSignedAgentCard(
     ...(opts.description ? { description: opts.description } : {}),
     ...(opts.rpcUrl ? { a2a: { rpcUrl: opts.rpcUrl } } : {}),
     extensions: {
-      agentwire: {
-        version: "0.2",
+      agentworld: {
+        version: PROTOCOL_VERSION,
         agentId: identity.agentId,
         identityMode: "direct",
         identity: {
@@ -75,12 +76,12 @@ export async function buildSignedAgentCard(
         },
         requestSigning: {
           headers: [
-            "X-AgentWire-Version",
-            "X-AgentWire-From",
-            "X-AgentWire-KeyId",
-            "X-AgentWire-Timestamp",
+            "X-AgentWorld-Version",
+            "X-AgentWorld-From",
+            "X-AgentWorld-KeyId",
+            "X-AgentWorld-Timestamp",
             "Content-Digest",
-            "X-AgentWire-Signature",
+            "X-AgentWorld-Signature",
           ],
         },
         profiles,

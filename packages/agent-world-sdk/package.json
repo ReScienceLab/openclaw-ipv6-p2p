@@ -1,6 +1,6 @@
 {
   "name": "@resciencelab/agent-world-sdk",
-  "version": "0.1.0",
+  "version": "0.3.2",
   "description": "Reusable DAP World Agent infrastructure — crypto, identity, peer DB, bootstrap, peer protocol",
   "type": "module",
   "main": "dist/index.js",
