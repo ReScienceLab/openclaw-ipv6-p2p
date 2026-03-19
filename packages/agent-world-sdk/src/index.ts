@@ -29,6 +29,7 @@ export {
 } from "./bootstrap.js";
 export { registerPeerRoutes } from "./peer-protocol.js";
 export { createWorldServer } from "./world-server.js";
+export { WorldLedger } from "./world-ledger.js";
 export type {
   Endpoint,
   PeerRecord,
@@ -45,4 +46,8 @@ export type {
   WorldServer,
   KeyRotationRequest,
   KeyRotationIdentity,
+  LedgerEntry,
+  LedgerEvent,
+  AgentSummary,
+  LedgerQueryOpts,
 } from "./types.js";

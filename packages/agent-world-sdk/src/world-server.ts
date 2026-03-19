@@ -10,11 +10,13 @@ import {
   DOMAIN_SEPARATORS,
   signWithDomainSeparator,
 } from "./crypto.js";
+import { WorldLedger } from "./world-ledger.js";
 import type {
   WorldConfig,
   WorldHooks,
   WorldServer,
   WorldManifest,
+  LedgerQueryOpts,
 } from "./types.js";
 
 const DEFAULT_BOOTSTRAP_URL =
@@ -92,6 +94,12 @@ export async function createWorldServer(
   // Track agents currently in world for idle eviction
   const agentLastSeen = new Map<string, number>();
 
+  // Append-only event ledger — blockchain-inspired agent activity log
+  const ledger = new WorldLedger(dataDir, worldId, identity);
+  console.log(
+    `[world] Ledger loaded — ${ledger.length} entries, head=${ledger.head?.hash.slice(0, 8) ?? "none"}`
+  );
+
   const fastify = Fastify({ logger: false });
 
   // Register peer protocol routes
@@ -127,6 +135,7 @@ export async function createWorldServer(
           }
           agentLastSeen.set(agentId, Date.now());
           const result = await hooks.onJoin(agentId, data);
+          ledger.append("world.join", agentId, (data["alias"] ?? data["name"]) as string | undefined);
           sendReply({
             ok: true,
             worldId,
@@ -146,6 +155,7 @@ export async function createWorldServer(
           agentLastSeen.delete(agentId);
           if (wasPresent) {
             await hooks.onLeave(agentId);
+            ledger.append("world.leave", agentId);
             console.log(
               `[world] ${agentId.slice(0, 8)} left — ${
                 agentLastSeen.size
@@ -163,6 +173,7 @@ export async function createWorldServer(
           }
           agentLastSeen.set(agentId, Date.now());
           const { ok, state } = await hooks.onAction(agentId, data);
+          ledger.append("world.action", agentId, undefined, { action: data["action"] as string | undefined });
           sendReply({ ok, state });
           return;
         }
@@ -171,6 +182,32 @@ export async function createWorldServer(
           sendReply({ ok: true });
       }
     },
+  });
+
+  // World ledger HTTP endpoints
+  fastify.get("/world/ledger", async (req) => {
+    const query = req.query as Record<string, string>;
+    const opts: LedgerQueryOpts = {};
+    if (query.agent_id) opts.agentId = query.agent_id;
+    if (query.event) opts.event = query.event.split(",") as LedgerQueryOpts["event"];
+    if (query.since) opts.since = parseInt(query.since);
+    if (query.until) opts.until = parseInt(query.until);
+    if (query.limit) opts.limit = parseInt(query.limit);
+    return {
+      ok: true,
+      worldId,
+      chainHead: ledger.head?.hash ?? null,
+      total: ledger.length,
+      entries: ledger.getEntries(opts),
+    };
+  });
+
+  fastify.get("/world/agents", async () => {
+    return {
+      ok: true,
+      worldId,
+      agents: ledger.getAgentSummaries(new Set(agentLastSeen.keys())),
+    };
   });
 
   // Allow caller to register additional routes before listen
@@ -248,6 +285,7 @@ export async function createWorldServer(
       if (ts < cutoff) {
         agentLastSeen.delete(id);
         await hooks.onLeave(id).catch(() => {});
+        ledger.append("world.evict", id, undefined, { reason: "idle" });
         console.log(`[world] ${id.slice(0, 8)} evicted (idle)`);
       }
     }
@@ -282,6 +320,7 @@ export async function createWorldServer(
   return {
     fastify,
     identity,
+    ledger,
     async stop() {
       clearInterval(broadcastTimer);
       clearInterval(evictionTimer);

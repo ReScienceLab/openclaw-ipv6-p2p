@@ -8,7 +8,8 @@ const nacl = (await import("tweetnacl")).default
 
 import { createRequire } from "node:module"
 const require = createRequire(import.meta.url)
-const { version: PROTOCOL_VERSION } = require("../package.json")
+const pkgVersion = require("../package.json").version
+const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
 
 const { startPeerServer, stopPeerServer } = await import("../dist/peer-server.js")
 const { initDb } = await import("../dist/peer-db.js")
