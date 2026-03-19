@@ -12,8 +12,12 @@ import * as path from "path"
 import * as os from "os"
 import { Identity, AwRequestHeaders, AwResponseHeaders } from "./types"
 
+// Protocol version for HTTP signatures and domain separators.
+// Uses major.minor from package.json — only changes on breaking protocol updates.
+// This MUST match the SDK's PROTOCOL_VERSION to allow cross-node signature verification.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { version: PROTOCOL_VERSION } = require("../package.json")
+const pkgVersion: string = require("../package.json").version
+const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
 
 // ── did:key mapping ─────────────────────────────────────────────────────────
 

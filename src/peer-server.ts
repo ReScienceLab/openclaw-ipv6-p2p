@@ -12,7 +12,8 @@ import Fastify, { FastifyInstance } from "fastify"
 import { P2PMessage, Identity, Endpoint } from "./types"
 import { verifySignature, agentIdFromPublicKey, verifyHttpRequestHeaders, signHttpResponse as signHttpResponseFn } from "./identity"
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { version: PROTOCOL_VERSION } = require("../package.json")
+const pkgVersion: string = require("../package.json").version
+const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
 import { tofuVerifyAndCache, tofuReplaceKey, getPeersForExchange, upsertDiscoveredPeer, removePeer, getPeer } from "./peer-db"
 
 const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000 // 5 minutes
