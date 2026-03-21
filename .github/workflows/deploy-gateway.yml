@@ -1,0 +1,142 @@
+# Deploy AWN Gateway to EC2 via ECR + SSM
+#
+# Prerequisites (one-time manual setup):
+#   1. ECR repository "awn-gateway" in us-east-2
+#   2. GitHub OIDC provider configured in AWS IAM
+#   3. IAM Role with trust policy for GitHub OIDC (repo: ReScienceLab/agent-world-network)
+#      - ECR permissions: GetAuthorizationToken, BatchCheckLayerAvailability,
+#        InitiateLayerUpload, UploadLayerPart, CompleteLayerUpload, PutImage,
+#        BatchGetImage, GetDownloadUrlForLayer
+#      - SSM permissions: SendCommand, GetCommandInvocation (scoped to i-04670f4d1a72c7d5d)
+#   4. EC2 instance i-04670f4d1a72c7d5d:
+#      - SSM Agent running, Docker installed
+#      - Security group: inbound 8099, 8100
+#      - Directory /opt/awn-gateway/data exists
+#   5. GitHub secret AWS_DEPLOY_ROLE_ARN set to the IAM role ARN
+
+name: Deploy Gateway
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gateway/**"
+      - "packages/agent-world-sdk/**"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-gateway
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Build & Deploy Gateway
+    runs-on: ubuntu-latest
+    env:
+      ECR_REPOSITORY: awn-gateway
+      INSTANCE_ID: i-04670f4d1a72c7d5d
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-2
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push Docker image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPOSITORY"
+          docker build -f gateway/Dockerfile -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Deploy via SSM
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPOSITORY:${{ github.sha }}"
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="[
+              \"aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin $REGISTRY\",
+              \"docker pull $IMAGE\",
+              \"docker stop awn-gateway 2>/dev/null || true\",
+              \"docker rm awn-gateway 2>/dev/null || true\",
+              \"docker run -d --name awn-gateway --restart unless-stopped -p 8099:8099 -p 8100:8100 -v /opt/awn-gateway/data:/data -e PEER_PORT=8099 -e HTTP_PORT=8100 -e DATA_DIR=/data $IMAGE\"
+            ]" \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          # Wait for command to complete
+          for i in $(seq 1 30); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query "Status" \
+              --output text 2>/dev/null || echo "Pending")
+
+            echo "Attempt $i: Status=$STATUS"
+
+            if [ "$STATUS" = "Success" ]; then
+              echo "Deploy command succeeded"
+              exit 0
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
+              echo "Deploy command failed with status: $STATUS"
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "$INSTANCE_ID" \
+                --query "StandardErrorContent" \
+                --output text
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for deploy command"
+          exit 1
+
+      - name: Health check
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands='["sleep 5","curl -sf http://localhost:8100/health"]' \
+            --query "Command.CommandId" \
+            --output text)
+
+          sleep 15
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "Status" \
+            --output text)
+
+          if [ "$STATUS" = "Success" ]; then
+            echo "Health check passed"
+          else
+            echo "Health check failed (status: $STATUS)"
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query "StandardErrorContent" \
+              --output text
+            exit 1
+          fi
