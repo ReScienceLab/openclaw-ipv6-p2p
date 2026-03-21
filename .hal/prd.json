@@ -1,0 +1,113 @@
+{
+  "project": "Gateway Persistence \u0026 Hardening",
+  "branchName": "hal/gateway-persistence-hardening",
+  "description": "Persist the AWN Gateway world registry across restarts, clean up misleading registry naming, harden lifecycle shutdown behavior, and improve health-check observability without changing public endpoint behavior.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Rename gateway peer terminology to registry terminology",
+      "description": "As a developer, I want the Gateway's internal naming to reflect its role as a world registry so that the code is self-documenting without changing runtime behavior.",
+      "acceptanceCriteria": [
+        "`const peers = new Map()` is renamed to `const registry = new Map()`",
+        "`upsertPeer()` is renamed to `upsertAgent()`",
+        "`pruneStale()` is renamed to `pruneStaleAgents()`",
+        "`getPeersForExchange()` is renamed to `getAgentsForExchange()`",
+        "`MAX_PEERS` is renamed to `MAX_AGENTS`",
+        "All references to the old names in `gateway/server.mjs` are updated",
+        "`/health` response field `peers` is renamed to `agents`",
+        "All existing endpoints return the same data as before except for the `/health` field rename",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Add registry load and atomic save helpers",
+      "description": "As an operator, I want the Gateway to load and save registry data in `$DATA_DIR/registry.json` so that restart recovery does not depend on fresh announces.",
+      "acceptanceCriteria": [
+        "`loadRegistry()` reads `$DATA_DIR/registry.json` during startup",
+        "`loadRegistry()` discards entries older than `STALE_TTL_MS` before adding them to the in-memory registry",
+        "`saveRegistry()` writes registry state using a 1-second debounce",
+        "`flushRegistry()` writes registry state immediately",
+        "Registry writes are atomic by writing `registry.json.tmp` and then renaming it to `registry.json`",
+        "The persisted file schema is `{ \"version\": 1, \"savedAt\": \u003cms\u003e, \"agents\": { \u003cagentId\u003e: \u003crecord\u003e } }`",
+        "If `registry.json` is missing or invalid on startup, the server logs a warning and starts with an empty registry",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Wire persistence into announce and prune flows",
+      "description": "As an operator, I want registry mutations to persist automatically so that normal announce and prune activity keeps the on-disk registry current.",
+      "acceptanceCriteria": [
+        "`upsertAgent()` schedules a debounced `saveRegistry()` when announce data changes the registry",
+        "`pruneStaleAgents()` calls `flushRegistry()` immediately when at least one stale entry is removed",
+        "Startup loads persisted registry entries into the in-memory registry before serving requests",
+        "No new files or dependencies are added outside `gateway/server.mjs`",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Stop `/peer/message` from polluting the registry and tune stale cleanup timing",
+      "description": "As a developer, I want `/peer/message` to avoid creating empty registry records and stale cleanup to run faster so that the registry stays accurate and dead worlds disappear sooner.",
+      "acceptanceCriteria": [
+        "The `/peer/message` handler no longer calls `upsertAgent()` with an empty address record",
+        "The `/peer/message` handler still relays `world.state` broadcasts to WebSocket subscribers",
+        "`STALE_TTL_MS` default is changed from `30 * 60 * 1000` to `15 * 60 * 1000`",
+        "The prune interval is changed from `5 * 60 * 1000` to `3 * 60 * 1000`",
+        "All existing peer protocol endpoints continue to work identically except that `/peer/message` no longer upserts registry entries",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Add graceful shutdown that flushes registry state",
+      "description": "As an operator, I want the Gateway to flush registry data and close cleanly on process signals so that shutdown does not lose recent updates or leave background work running.",
+      "acceptanceCriteria": [
+        "`startPeerListener()` returns the Fastify instance it creates",
+        "`SIGTERM` handler calls `flushRegistry()`, closes both Fastify servers, and clears active intervals",
+        "`SIGINT` handler calls `flushRegistry()`, closes both Fastify servers, and clears active intervals",
+        "Shutdown logic runs without introducing new dependencies or files",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Enhance `/health` with registry age and readiness status",
+      "description": "As an operator, I want `/health` to report registry freshness and readiness state so that deployment monitoring can distinguish empty, warming, and ready gateway states.",
+      "acceptanceCriteria": [
+        "`/health` includes `registryAge` as milliseconds since the last registry modification, or `null` when the registry is empty",
+        "`/health` includes `status: \"ready\"` when worlds count is greater than 0",
+        "`/health` includes `status: \"warming\"` when agents count is greater than 0 and worlds count is 0",
+        "`/health` includes `status: \"empty\"` when agents count is 0",
+        "`/health` keeps `ok: true` for backward-compatible health checks",
+        "Existing `/health` consumers can continue reading the endpoint without authentication or path changes",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
