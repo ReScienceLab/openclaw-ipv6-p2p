@@ -98,7 +98,7 @@ export function upsertDiscoveredPeer(
     alias?: string
     version?: string
     discoveredVia?: string
-    source?: "bootstrap" | "gossip"
+    source?: "bootstrap" | "gossip" | "gateway"
     lastSeen?: number
     endpoints?: Endpoint[]
     capabilities?: string[]

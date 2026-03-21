@@ -23,7 +23,7 @@ body:
       description: How can we reproduce the issue?
       placeholder: |
         1. Start OpenClaw with AWN plugin
-        2. Run `awn status`
+        2. Run `openclaw awn status`
         3. See error...
     validations:
       required: true

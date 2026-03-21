@@ -155,6 +155,7 @@ function stopWorldMemberRefreshIfIdle(): void {
 
 function dropJoinedWorld(worldId: string): void {
   removeWorldMembers(worldId)
+  removeWorld(worldId)
   _joinedWorlds.delete(worldId)
   _worldRefreshFailures.delete(worldId)
   stopWorldMemberRefreshIfIdle()
@@ -241,6 +242,62 @@ function buildSendOpts(peerIdOrAddr?: string): SendOptions {
   return {
     endpoints: peer?.endpoints,
     quicTransport: _quicTransport?.isActive() ? _quicTransport : undefined,
+    expectedPublicKey: peer?.publicKey || undefined,
+  }
+}
+
+function getGatewayUrl(): string {
+  return (process.env.GATEWAY_URL ?? "http://localhost:8100").replace(/\/+$/, "")
+}
+
+async function fetchGatewayWorldRecord(worldId: string): Promise<{
+  agentId?: string
+  alias?: string
+  endpoints?: Endpoint[]
+  publicKey?: string
+} | null> {
+  try {
+    const resp = await fetch(`${getGatewayUrl()}/world/${encodeURIComponent(worldId)}`, {
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!resp.ok) return null
+
+    const data = await resp.json() as Record<string, unknown>
+    const detail = typeof data.world === "object" && data.world
+      ? data.world as Record<string, unknown>
+      : data
+    const host = typeof detail.host === "object" && detail.host
+      ? detail.host as Record<string, unknown>
+      : null
+
+    const endpoints = Array.isArray(detail.endpoints)
+      ? detail.endpoints as Endpoint[]
+      : Array.isArray(host?.endpoints)
+        ? host.endpoints as Endpoint[]
+        : undefined
+    const publicKey = typeof detail.publicKey === "string"
+      ? detail.publicKey
+      : typeof host?.publicKey === "string"
+        ? host.publicKey
+        : undefined
+    const agentId = typeof detail.agentId === "string"
+      ? detail.agentId
+      : typeof host?.agentId === "string"
+        ? host.agentId
+        : undefined
+    const alias = typeof detail.name === "string"
+      ? detail.name
+      : typeof detail.alias === "string"
+        ? detail.alias
+        : typeof host?.name === "string"
+          ? host.name
+          : typeof host?.alias === "string"
+            ? host.alias
+            : undefined
+
+    return { agentId, alias, endpoints, publicKey }
+  } catch {
+    return null
   }
 }
 
@@ -283,7 +340,6 @@ export default function register(api: any) {
 
       if (activeTransport) {
         console.log(`[awn] Active transport: ${activeTransport.id} -> ${activeTransport.address}`)
-        _agentMeta.endpoints = _transportManager.getEndpoints()
 
         if (_quicTransport.isActive()) {
           console.log(`[awn] QUIC endpoint: ${_quicTransport.address}`)
@@ -294,6 +350,18 @@ export default function register(api: any) {
       } else {
         console.warn("[awn] No QUIC transport available — HTTP-only mode")
       }
+
+      const advertisedEndpoints = _transportManager.getEndpoints()
+      if (cfg.advertise_address) {
+        advertisedEndpoints.push({
+          transport: "tcp",
+          address: cfg.advertise_address,
+          port: peerPort,
+          priority: advertisedEndpoints.length ? 2 : 1,
+          ttl: 3600,
+        })
+      }
+      _agentMeta.endpoints = advertisedEndpoints
 
       await startPeerServer(peerPort, { identity })
 
@@ -612,40 +680,29 @@ export default function register(api: any) {
     description: "List available Agent worlds from the World Registry and local cache.",
     parameters: { type: "object", properties: {}, required: [] },
     async execute(_id: string, _params: Record<string, never>) {
-      // Fetch from registry
+      // Fetch from Gateway
       let registryWorlds: Array<{ agentId: string; alias?: string; endpoints?: Endpoint[]; capabilities?: string[]; lastSeen: number }> = []
       try {
-        const registryUrl = "https://resciencelab.github.io/agent-world-network/bootstrap.json"
-        const resp = await fetch(registryUrl, { signal: AbortSignal.timeout(10_000) })
+        const resp = await fetch(`${getGatewayUrl()}/worlds`, { signal: AbortSignal.timeout(10_000) })
         if (resp.ok) {
-          const data = await resp.json() as { bootstrap_nodes?: Array<{ addr: string; httpPort?: number }> }
-          const nodes = (data.bootstrap_nodes ?? []).filter((n: any) => n.addr)
-          const results = await Promise.allSettled(nodes.slice(0, 5).map(async (node: any) => {
-            const isIpv6 = node.addr.includes(":") && !node.addr.includes(".")
-            const url = isIpv6
-              ? `http://[${node.addr}]:${node.httpPort ?? 8099}/worlds`
-              : `http://${node.addr}:${node.httpPort ?? 8099}/worlds`
-            const wr = await fetch(url, { signal: AbortSignal.timeout(10_000) })
-            if (!wr.ok) return []
-            const body = await wr.json() as { worlds?: any[] }
-            return body.worlds ?? []
-          }))
-          for (const r of results) {
-            if (r.status !== "fulfilled") continue
-            for (const w of r.value as any[]) {
-              if (w.agentId && !registryWorlds.some(rw => rw.agentId === w.agentId)) {
-                registryWorlds.push(w)
-                upsertDiscoveredPeer(w.agentId, w.publicKey ?? "", {
-                  alias: w.alias,
-                  endpoints: w.endpoints,
-                  capabilities: w.capabilities,
-                  source: "gossip",
-                })
-              }
+          const data = await resp.json() as { worlds?: Array<{ worldId: string; agentId: string; name?: string; lastSeen?: number }> }
+          for (const w of data.worlds ?? []) {
+            if (w.agentId && !registryWorlds.some(rw => rw.agentId === w.agentId)) {
+              registryWorlds.push({
+                agentId: w.agentId,
+                alias: w.name,
+                capabilities: [`world:${w.worldId}`],
+                lastSeen: w.lastSeen ?? Date.now(),
+              })
+              upsertDiscoveredPeer(w.agentId, "", {
+                alias: w.name,
+                capabilities: [`world:${w.worldId}`],
+                source: "gateway",
+              })
             }
           }
         }
-      } catch { /* registry unreachable */ }
+      } catch { /* gateway unreachable */ }
 
       // Merge with local cache
       const localWorlds = findPeersByCapability("world:")
@@ -717,14 +774,33 @@ export default function register(api: any) {
         if (!worlds.length) {
           return { content: [{ type: "text", text: `World '${params.world_id}' not found. Use address parameter to connect directly.` }] }
         }
-        const world = worlds[0]
+        let world = worlds[0]
+        if ((!world.endpoints?.length || !world.publicKey) && params.world_id) {
+          const gatewayWorld = await fetchGatewayWorldRecord(params.world_id)
+          if (gatewayWorld?.agentId) {
+            upsertDiscoveredPeer(gatewayWorld.agentId, gatewayWorld.publicKey ?? "", {
+              alias: gatewayWorld.alias ?? world.alias,
+              capabilities: world.capabilities,
+              endpoints: gatewayWorld.endpoints ?? world.endpoints,
+              source: "gateway",
+            })
+
+            world = getPeer(gatewayWorld.agentId) ?? {
+              ...world,
+              agentId: gatewayWorld.agentId,
+              alias: gatewayWorld.alias ?? world.alias,
+              endpoints: gatewayWorld.endpoints ?? world.endpoints,
+              publicKey: gatewayWorld.publicKey ?? world.publicKey,
+            }
+          }
+        }
         if (!world.endpoints?.length) {
           return { content: [{ type: "text", text: `World '${params.world_id}' has no reachable endpoints.` }] }
         }
         targetAddr = world.endpoints[0].address
         targetPort = world.endpoints[0].port ?? peerPort
         worldAgentId = world.agentId
-        worldPublicKey = getPeer(worldAgentId)?.publicKey ?? ""
+        worldPublicKey = getPeer(worldAgentId)?.publicKey ?? world.publicKey ?? ""
       }
 
       if (!worldPublicKey) {
@@ -732,12 +808,23 @@ export default function register(api: any) {
       }
 
       const myEndpoints: Endpoint[] = _agentMeta.endpoints ?? []
+      if (myEndpoints.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: "No reachable endpoint can be advertised. Set advertise_address (for HTTP/TCP) or configure QUIC before joining a world.",
+          }],
+          isError: true,
+        }
+      }
       const joinPayload = JSON.stringify({
         alias: params.alias ?? _agentMeta.name ?? identity.agentId.slice(0, 8),
         endpoints: myEndpoints,
       })
 
-      const result = await sendP2PMessage(identity, targetAddr, "world.join", joinPayload, targetPort, 10_000, buildSendOpts(worldAgentId))
+      const sendOpts = buildSendOpts(worldAgentId)
+      sendOpts.expectedPublicKey = worldPublicKey
+      const result = await sendP2PMessage(identity, targetAddr, "world.join", joinPayload, targetPort, 10_000, sendOpts)
       if (!result.ok) {
         return { content: [{ type: "text", text: `Failed to join world: ${result.error}` }], isError: true }
       }

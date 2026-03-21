@@ -172,7 +172,11 @@ function createHarness({
   const api = new Proxy({
     config: {
       identity: { name: "Tester" },
-      plugins: { entries: { awn: { config: { data_dir: "/tmp/awn-test" } } } },
+      plugins: { entries: { awn: { config: {
+        data_dir: "/tmp/awn-test",
+        advertise_address: "198.51.100.5",
+        advertise_port: 8099,
+      } } } },
     },
     gateway: {
       receiveChannelMessage(message) {
@@ -198,6 +202,7 @@ function createHarness({
 
   return {
     peers,
+    peerServer: peerServerMod,
     sendCalls,
     gatewayMessages,
     fetchCalls,
@@ -307,6 +312,72 @@ describe("plugin lifecycle", () => {
     }
   })
 
+  it("joins a gateway-discovered world_id after resolving missing world details", async () => {
+    const worldAgentId = "aw:sha256:world-host"
+    const worldPublicKey = "d29ybGQtcHVibGljLWtleQ=="
+    const worldEndpoint = { transport: "tcp", address: "203.0.113.10", port: 9000, priority: 1, ttl: 3600 }
+    const harness = createHarness({
+      joinResponse: {
+        ok: true,
+        data: {
+          worldId: "arena",
+          manifest: { name: "Arena" },
+          members: [],
+        },
+      },
+      fetchImpl: async (url) => {
+        const requestUrl = String(url)
+        if (requestUrl.endsWith("/worlds")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              worlds: [{ worldId: "arena", agentId: worldAgentId, name: "Arena" }],
+            }),
+          }
+        }
+        if (requestUrl.endsWith("/world/arena")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              world: {
+                agentId: worldAgentId,
+                name: "Arena",
+                publicKey: worldPublicKey,
+                endpoints: [worldEndpoint],
+              },
+            }),
+          }
+        }
+        return { ok: true, status: 200, json: async () => ({ members: [] }) }
+      },
+    })
+
+    try {
+      await harness.service.start()
+
+      const listWorlds = harness.tools.get("list_worlds")
+      const listed = await listWorlds.execute("tool-list", {})
+      assert.equal(listed.isError, undefined)
+
+      const joinWorld = harness.tools.get("join_world")
+      const joined = await joinWorld.execute("tool-join", { world_id: "arena" })
+      assert.equal(joined.isError, undefined)
+
+      const joinCall = harness.sendCalls.find((call) => call.event === "world.join")
+      assert.equal(joinCall?.targetAddr, "203.0.113.10")
+      assert.ok(harness.fetchCalls.some(([requestUrl]) => String(requestUrl).endsWith("/world/arena")))
+
+      const worldPeer = harness.peers.get(worldAgentId)
+      assert.ok(worldPeer)
+      assert.equal(worldPeer.publicKey, worldPublicKey)
+      assert.deepEqual(worldPeer.endpoints, [worldEndpoint])
+    } finally {
+      harness.restore()
+    }
+  })
+
   it("drops scoped members when world membership refresh is rejected", async () => {
     const worldAgentId = "aw:sha256:world-host"
     let refreshCalls = 0
@@ -354,6 +425,59 @@ describe("plugin lifecycle", () => {
 
       await harness.runIntervals()
       assert.equal(refreshCalls, 1)
+    } finally {
+      harness.restore()
+    }
+  })
+
+  it("revokes the peer-server allowlist when repeated refresh failures drop a world", async () => {
+    const worldAgentId = "aw:sha256:world-host"
+    let refreshCalls = 0
+    const harness = createHarness({
+      pingInfo: { ok: true, data: { agentId: worldAgentId, publicKey: "d29ybGQtcHVibGljLWtleQ==" } },
+      joinResponse: {
+        ok: true,
+        data: {
+          worldId: "arena",
+          manifest: { name: "Arena" },
+          members: [
+            {
+              agentId: "aw:sha256:member-1",
+              alias: "Member One",
+              endpoints: [
+                { transport: "tcp", address: "198.51.100.20", port: 9100, priority: 1, ttl: 3600 },
+              ],
+            },
+          ],
+        },
+      },
+      fetchImpl: async () => {
+        refreshCalls += 1
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ members: [] }),
+        }
+      },
+    })
+
+    try {
+      await harness.service.start()
+
+      const joinWorld = harness.tools.get("join_world")
+      const result = await joinWorld.execute("tool-3", { address: "203.0.113.10:9000" })
+
+      assert.equal(result.isError, undefined)
+      assert.equal(harness.peerServer.isCoMember("aw:sha256:member-1"), true)
+
+      await harness.runIntervals()
+      await harness.runIntervals()
+      assert.equal(refreshCalls, 2)
+      assert.equal(harness.peerServer.isCoMember("aw:sha256:member-1"), true)
+
+      await harness.runIntervals()
+      assert.equal(refreshCalls, 3)
+      assert.equal(harness.peerServer.isCoMember("aw:sha256:member-1"), false)
     } finally {
       harness.restore()
     }

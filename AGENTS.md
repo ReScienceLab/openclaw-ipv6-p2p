@@ -27,15 +27,10 @@ Always run build before tests — tests import from `dist/`.
 │   ├── channel.ts              → OpenClaw channel registration (inbound/outbound wiring)
 │   └── types.ts                → Shared interfaces
 ├── test/                       → Node.js built-in test runner (node:test)
-├── bootstrap/                  → World Registry server (deployed on AWS)
-│   ├── server.mjs              → World Registry server (deployed on AWS)
-│   ├── Dockerfile              → node:22-alpine container
-│   └── package.json            → Minimal deps (no TypeScript)
 ├── skills/awn/              → ClawHub skill definition
 │   ├── SKILL.md                → Skill frontmatter + tool docs
 │   └── references/             → Supplementary docs (flows, discovery, install)
-├── docs/                       → GitHub Pages assets
-│   └── bootstrap.json          → Dynamic World Registry node list
+├── docs/                       → GitHub Pages docs for world discovery and architecture
 ├── openclaw.plugin.json        → Plugin manifest (channels, config schema, UI hints)
 └── docker/                     → Docker Compose for local multi-node testing
 ```
@@ -78,13 +73,11 @@ All runtime config is in `openclaw.json` under `plugins.entries.awn.config`:
 }
 ```
 
-### World Registry Nodes
-- 5 AWS EC2 t3.medium across us-east-2, us-west-2, eu-west-1, ap-northeast-1, ap-southeast-1
-- Managed via AWS SSM (no SSH) — IAM profile `openclaw-p2p-ssm-profile`
-- Deploy: `base64 -i bootstrap/server.mjs` → SSM send-command → restart systemd service
-- Nodes serve as a World Registry and only accept world server registrations
-- Individual agent announcements are rejected by the registry
-- World listings are exposed to agents through `list_worlds()` and direct joins happen through `join_world()`
+### Gateway World Discovery
+- World Servers announce directly to the Gateway via `GATEWAY_URL`
+- The Gateway exposes `GET /worlds` for discovery and `GET /world/<worldId>` for endpoint/public-key lookup during `join_world()`
+- There is no standalone `bootstrap/` deployment or published `docs/bootstrap.json` artifact in this branch
+- Agents still use `list_worlds()` for discovery and `join_world()` for direct membership
 
 ### Peer DB
 - JSON file at `$data_dir/peers.json`
@@ -193,7 +186,6 @@ No manual version bumping, no release scripts, no backmerge.
 | `publish.yml` | `workflow_dispatch` only | Emergency manual npm publish |
 | `test.yml` | Push/PR to `main` | Build + test (Node 20+22) |
 | `auto-close-issues.yml` | PR merged | Close linked issues |
-| `bootstrap-health.yml` | Scheduled (every 6h) | Ping all 5 bootstrap nodes |
 
 ### Branch Strategy
 
@@ -243,30 +235,11 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`
 
 When adding a changeset, choose accordingly.
 
-### Bootstrap Node Deployment
-- Only needed when `bootstrap/server.mjs` or `bootstrap/package.json` changes
-- Deploy via AWS SSM (no SSH):
-  ```bash
-  B64=$(base64 -i bootstrap/server.mjs)
-  for pair in "i-04670f4d1a72c7d5d:us-east-2" "i-096ba79b9ae854339:us-west-2" \
-    "i-084242224f1a49b13:eu-west-1" "i-0b909aacd92097e43:ap-northeast-1" \
-    "i-0141cd0f56a902978:ap-southeast-1"; do
-    IID=${pair%%:*}; REGION=${pair##*:}
-    aws ssm send-command --instance-ids $IID --region $REGION \
-      --document-name "AWS-RunShellScript" \
-      --parameters "{\"commands\":[\"echo '${B64}' | base64 -d > /opt/awn-bootstrap/server.mjs\",\"systemctl restart awn-bootstrap\"]}" \
-      --query 'Command.CommandId' --output text
-    echo "$REGION: deployed"
-  done
-  ```
-- If `bootstrap/package.json` also changed (e.g., dependency upgrade), deploy it too and run `npm install`:
-  ```bash
-  B64_PKG=$(base64 -i bootstrap/package.json)
-  # same loop, but commands: decode package.json + cd + npm install + restart
-  ```
-- After deploying, update `docs/bootstrap.json` with the node's public HTTP address (`addr` field).
-- Verify: `curl -s http://<node-public-addr>:8099/worlds`
-  Expected response: `{"worlds":[...]}`
+### Gateway Discovery Deployment
+- This branch no longer ships or deploys a standalone `bootstrap/` service
+- If world discovery behavior changes, update the Gateway deployment that serves `GATEWAY_URL`
+- Verify discovery with `curl -s "$GATEWAY_URL/worlds"` and, for a specific world, `curl -s "$GATEWAY_URL/world/<worldId>"`
+- The published docs page documents those Gateway endpoints directly; there is no `docs/bootstrap.json` mirror to keep in sync
 
 ### Version-bearing Files
 

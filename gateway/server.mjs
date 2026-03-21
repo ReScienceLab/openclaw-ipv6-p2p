@@ -2,10 +2,13 @@
  * AWN Gateway — stateless portal + WebSocket bridge.
  * No OpenClaw dependency. Runs on plain HTTP/TCP.
  *
+ * World Servers announce directly to this Gateway via POST /peer/announce.
+ * The Gateway maintains a peer DB and exposes discovered worlds via /worlds.
+ *
  * HTTP Endpoints:
  *   GET  /health          — health check
- *   GET  /worlds          — list discovered world:* peers on AWN network
- *   GET  /agents          — list all known AWN peers
+ *   GET  /worlds          — list discovered world:* agents on AWN network
+ *   GET  /agents          — list all known AWN agents
  *   GET  /world/:worldId  — info about a specific world
  *
  * WebSocket:
@@ -21,13 +24,13 @@
  *   HTTP_PORT         — gateway public HTTP port (default 8100)
  *   PUBLIC_ADDR       — own public IP/hostname for AWN announce
  *   DATA_DIR          — identity persistence (default /data)
- *   BOOTSTRAP_URL     — bootstrap node list (default GitHub Pages)
- *   DISCOVERY_INTERVAL_MS — how often to re-discover worlds (default 60000)
  */
-import Fastify from "fastify";
-import websocketPlugin from "@fastify/websocket";
-import cors from "@fastify/cors";
-import nacl from "tweetnacl";
+import fs from "node:fs"
+import path from "node:path"
+import Fastify from "fastify"
+import websocketPlugin from "@fastify/websocket"
+import cors from "@fastify/cors"
+import nacl from "tweetnacl"
 import {
   agentIdFromPublicKey,
   canonicalize,
@@ -37,76 +40,178 @@ import {
   verifyHttpRequestHeaders,
   loadOrCreateIdentity,
   buildSignedAgentCard,
-} from "@resciencelab/agent-world-sdk";
+  verifyWithDomainSeparator,
+  DOMAIN_SEPARATORS,
+} from "@resciencelab/agent-world-sdk"
 
-const PEER_PORT = parseInt(process.env.PEER_PORT ?? "8099");
-const HTTP_PORT = parseInt(process.env.HTTP_PORT ?? "8100");
-const PUBLIC_ADDR = process.env.PUBLIC_ADDR ?? null;
-const PUBLIC_URL = process.env.PUBLIC_URL ?? null; // e.g. https://gateway.example.com
-const DATA_DIR = process.env.DATA_DIR ?? "/data";
-const BOOTSTRAP_URL = process.env.BOOTSTRAP_URL ?? "https://resciencelab.github.io/agent-world-network/bootstrap.json";
-const DISCOVERY_INTERVAL_MS = parseInt(process.env.DISCOVERY_INTERVAL_MS ?? "60000");
-const STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(30 * 60 * 1000)); // 30 min
-const MAX_PEERS = 500;
+const PEER_PORT = parseInt(process.env.PEER_PORT ?? "8099")
+const HTTP_PORT = parseInt(process.env.HTTP_PORT ?? "8100")
+const PUBLIC_ADDR = process.env.PUBLIC_ADDR ?? null
+const PUBLIC_URL = process.env.PUBLIC_URL ?? null // e.g. https://gateway.example.com
+const DATA_DIR = process.env.DATA_DIR ?? "/data"
+const STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(15 * 60 * 1000)) // 15 min
+const MAX_AGENTS = 500
+const REGISTRY_VERSION = 1
+const REGISTRY_PATH = path.join(DATA_DIR, "registry.json")
+const REGISTRY_TMP_PATH = `${REGISTRY_PATH}.tmp`
+const SAVE_DEBOUNCE_MS = 1000
 
 // ---------------------------------------------------------------------------
 // Identity (loaded via agent-world-sdk)
 // ---------------------------------------------------------------------------
 
-const identity = loadOrCreateIdentity(DATA_DIR, "gateway-identity");
-const selfPubB64 = identity.pubB64;
-const selfAgentId = identity.agentId;
+const identity = loadOrCreateIdentity(DATA_DIR, "gateway-identity")
+const selfPubB64 = identity.pubB64
+const selfAgentId = identity.agentId
 
-console.log(`[gateway] agentId=${selfAgentId}`);
+console.log(`[gateway] agentId=${selfAgentId}`)
 
 // ---------------------------------------------------------------------------
-// Peer DB
+// Registry
 // ---------------------------------------------------------------------------
-const peers = new Map(); // agentId -> PeerRecord
+const registry = new Map() // agentId -> PeerRecord
+let _saveTimer = null
+let _pruneTimer = null
+let _shutdownPromise = null
+let _registryModifiedAt = null
 
-function upsertPeer(agentId, publicKey, opts = {}) {
-  const now = Date.now();
-  const existing = peers.get(agentId);
-  // For gossipped peers, preserve the original lastSeen from the sender
+function writeRegistry() {
+  fs.mkdirSync(DATA_DIR, { recursive: true })
+  const payload = {
+    version: REGISTRY_VERSION,
+    savedAt: Date.now(),
+    agents: Object.fromEntries([...registry.entries()]),
+  }
+  fs.writeFileSync(REGISTRY_TMP_PATH, JSON.stringify(payload, null, 2))
+  fs.renameSync(REGISTRY_TMP_PATH, REGISTRY_PATH)
+}
+
+function loadRegistry() {
+  if (!fs.existsSync(REGISTRY_PATH)) {
+    console.warn(`[gateway] Registry file missing at ${REGISTRY_PATH}; starting with empty registry`)
+    registry.clear()
+    _registryModifiedAt = null
+    return
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(REGISTRY_PATH, "utf8"))
+    if (raw?.version !== REGISTRY_VERSION || !raw?.agents || typeof raw.agents !== "object") {
+      throw new Error("invalid registry schema")
+    }
+
+    registry.clear()
+    const cutoff = Date.now() - STALE_TTL_MS
+    let loaded = 0
+    let discarded = 0
+
+    for (const [agentId, record] of Object.entries(raw.agents)) {
+      if (!record || typeof record !== "object") {
+        discarded++
+        continue
+      }
+      const lastSeen = typeof record.lastSeen === "number" ? record.lastSeen : 0
+      if (lastSeen < cutoff) {
+        discarded++
+        continue
+      }
+      registry.set(agentId, record)
+      loaded++
+    }
+
+    _registryModifiedAt = loaded > 0
+      ? (typeof raw.savedAt === "number" ? raw.savedAt : Date.now())
+      : null
+    console.log(`[gateway] Loaded ${loaded} agents from registry (discarded ${discarded} stale)`)
+  } catch (error) {
+    console.warn(`[gateway] Failed to load registry from ${REGISTRY_PATH}; starting with empty registry`, error)
+    registry.clear()
+    _registryModifiedAt = null
+  }
+}
+
+function saveRegistry() {
+  if (_saveTimer) return
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null
+    try {
+      writeRegistry()
+    } catch (error) {
+      console.warn(`[gateway] Failed to save registry to ${REGISTRY_PATH}`, error)
+    }
+  }, SAVE_DEBOUNCE_MS)
+}
+
+function flushRegistry() {
+  if (_saveTimer) {
+    clearTimeout(_saveTimer)
+    _saveTimer = null
+  }
+
+  try {
+    writeRegistry()
+  } catch (error) {
+    console.warn(`[gateway] Failed to flush registry to ${REGISTRY_PATH}`, error)
+  }
+}
+
+function upsertAgent(agentId, publicKey, opts = {}) {
+  const persist = opts.persist === true
+  const now = Date.now()
+  const existing = registry.get(agentId)
+  // For gossipped agents, preserve the original lastSeen from the sender
   // Only use Date.now() for direct contacts (no lastSeen provided)
   const lastSeen = opts.lastSeen
     ? Math.max(existing?.lastSeen ?? 0, opts.lastSeen)
-    : now;
-  peers.set(agentId, {
+    : now
+  const nextRecord = {
     agentId,
     publicKey: publicKey || existing?.publicKey || "",
     alias: opts.alias ?? existing?.alias ?? "",
     endpoints: opts.endpoints ?? existing?.endpoints ?? [],
     capabilities: opts.capabilities ?? existing?.capabilities ?? [],
     lastSeen,
-  });
-  if (peers.size > MAX_PEERS) {
-    const oldest = [...peers.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0];
-    peers.delete(oldest.agentId);
+  }
+  const changed = JSON.stringify(existing ?? null) !== JSON.stringify(nextRecord)
+  registry.set(agentId, nextRecord)
+  let trimmed = false
+  if (registry.size > MAX_AGENTS) {
+    const oldest = [...registry.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0]
+    registry.delete(oldest.agentId)
+    trimmed = true
+  }
+  if (changed || trimmed) {
+    _registryModifiedAt = now
+  }
+  if (persist && (changed || trimmed)) {
+    saveRegistry()
   }
 }
 
-function pruneStale(ttl = STALE_TTL_MS) {
-  const cutoff = Date.now() - ttl;
-  let pruned = 0;
-  for (const [id, p] of peers) {
-    if (p.lastSeen < cutoff) { peers.delete(id); pruned++; }
+function pruneStaleAgents(ttl = STALE_TTL_MS) {
+  const cutoff = Date.now() - ttl
+  let pruned = 0
+  for (const [id, p] of registry) {
+    if (p.lastSeen < cutoff) { registry.delete(id); pruned++ }
   }
-  if (pruned > 0) console.log(`[gateway] Pruned ${pruned} stale peer(s) (TTL ${Math.round(ttl / 60000)}min)`);
+  if (pruned > 0) {
+    console.log(`[gateway] Pruned ${pruned} stale agent(s) (TTL ${Math.round(ttl / 60000)}min)`)
+    flushRegistry()
+  }
 }
 
-function getPeersForExchange(limit = 50) {
-  return [...peers.values()]
+function getAgentsForExchange(limit = 50) {
+  return [...registry.values()]
     .sort((a, b) => b.lastSeen - a.lastSeen)
     .slice(0, limit)
     .map(({ agentId, publicKey, alias, endpoints, capabilities, lastSeen }) => ({
       agentId, publicKey, alias, endpoints: endpoints ?? [], capabilities: capabilities ?? [], lastSeen,
-    }));
+    }))
 }
 
 function findByCapability(cap) {
   const isPrefix = cap.endsWith(":");
-  return [...peers.values()].filter((p) =>
+  return [...registry.values()].filter((p) =>
     p.capabilities?.some((c) => isPrefix ? c.startsWith(cap) : c === cap)
   ).sort((a, b) => b.lastSeen - a.lastSeen);
 }
@@ -180,112 +285,6 @@ async function sendToWorld(worldId, event, content) {
 }
 
 // ---------------------------------------------------------------------------
-// Bootstrap discovery
-// ---------------------------------------------------------------------------
-
-async function fetchBootstrapNodes() {
-  try {
-    const resp = await fetch(BOOTSTRAP_URL, { signal: AbortSignal.timeout(10_000) });
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    return (data.bootstrap_nodes ?? []).filter((n) => n.addr).map((n) => ({
-      addr: n.addr, httpPort: n.httpPort ?? 8099,
-    }));
-  } catch { return []; }
-}
-
-async function announceToNode(addr, httpPort) {
-  const isIpv6 = addr.includes(":") && !addr.includes(".");
-  const url = isIpv6 ? `http://[${addr}]:${httpPort}/peer/announce` : `http://${addr}:${httpPort}/peer/announce`;
-  const selfEndpoints = PUBLIC_ADDR
-    ? [{ transport: "tcp", address: PUBLIC_ADDR, port: PEER_PORT, priority: 1, ttl: 3600 }]
-    : [];
-  const payload = {
-    from: selfAgentId,
-    publicKey: selfPubB64,
-    alias: "AWN Gateway",
-    version: "1.0.0",
-    endpoints: selfEndpoints,
-    capabilities: ["gateway"],
-    timestamp: Date.now(),
-  };
-  payload.signature = signPayload(payload, identity.secretKey);
-  try {
-    const body = JSON.stringify(canonicalize(payload));
-    const urlObj = new URL(url);
-    const awHeaders = signHttpRequest(identity, "POST", urlObj.host, "/peer/announce", body);
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...awHeaders },
-      body,
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!resp.ok) return;
-    const data = await resp.json();
-    for (const peer of data.peers ?? []) {
-      if (peer.agentId && peer.agentId !== selfAgentId) {
-        upsertPeer(peer.agentId, peer.publicKey, {
-          alias: peer.alias, endpoints: peer.endpoints, capabilities: peer.capabilities,
-          lastSeen: peer.lastSeen,
-        });
-      }
-    }
-    console.log(`[gateway] Announced to ${addr}:${httpPort}, got ${data.peers?.length ?? 0} peers`);
-  } catch (e) {
-    console.warn(`[gateway] Could not reach bootstrap ${addr}:${httpPort}: ${e.message}`);
-  }
-}
-
-function worldIdFromPeer(peer) {
-  const cap = peer.capabilities?.find((c) => c.startsWith("world:"));
-  return cap ? cap.slice("world:".length) : null;
-}
-
-async function probeWorldReachable(peer) {
-  if (!peer.endpoints?.length) return false;
-  const expectedWorldId = worldIdFromPeer(peer);
-  for (const ep of peer.endpoints) {
-    try {
-      const addr = ep.address;
-      const port = ep.port ?? PEER_PORT;
-      const isIpv6 = addr.includes(":") && !addr.includes(".");
-      const url = isIpv6 ? `http://[${addr}]:${port}/peer/ping` : `http://${addr}:${port}/peer/ping`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        // World agents must return worldId in ping response
-        if (expectedWorldId) {
-          if (!data.worldId) return false; // not a world agent (e.g. gateway)
-          if (data.worldId !== expectedWorldId) return false; // port collision
-        }
-        return true;
-      }
-    } catch {}
-  }
-  return false;
-}
-
-async function discoverWorlds() {
-  const nodes = await fetchBootstrapNodes();
-  if (!nodes.length) { console.warn("[gateway] No bootstrap nodes found"); return; }
-  await Promise.allSettled(nodes.map((n) => announceToNode(n.addr, n.httpPort)));
-
-  // Probe world endpoints and remove unreachable ones
-  const worlds = findByCapability("world:");
-  const results = await Promise.allSettled(worlds.map((w) => probeWorldReachable(w)));
-  let removed = 0;
-  for (let i = 0; i < worlds.length; i++) {
-    const reachable = results[i].status === "fulfilled" && results[i].value;
-    if (!reachable) {
-      peers.delete(worlds[i].agentId);
-      removed++;
-    }
-  }
-  const remaining = findByCapability("world:");
-  console.log(`[gateway] Discovered ${worlds.length} world(s), ${removed} unreachable removed, ${remaining.length} live, ${peers.size} peers total`);
-}
-
-// ---------------------------------------------------------------------------
 // AWN peer server (receive world.state broadcasts from World Agents)
 // ---------------------------------------------------------------------------
 
@@ -303,7 +302,7 @@ async function startPeerListener() {
   });
 
   peerServer.get("/peer/ping", async () => ({ ok: true, ts: Date.now(), role: "gateway" }));
-  peerServer.get("/peer/peers", async () => ({ peers: getPeersForExchange() }));
+  peerServer.get("/peer/peers", async () => ({ peers: getAgentsForExchange() }));
 
   peerServer.post("/peer/announce", async (req, reply) => {
     const ann = req.body;
@@ -316,7 +315,9 @@ async function startPeerListener() {
       if (!result.ok) return reply.code(403).send({ error: result.error });
     } else {
       const { signature, ...signable } = ann;
-      if (!verifySignature(ann.publicKey, signable, signature)) {
+      // Try domain-separated verification first, then fall back to plain for backward compat
+      const domainOk = verifyWithDomainSeparator(DOMAIN_SEPARATORS.ANNOUNCE, ann.publicKey, signable, signature);
+      if (!domainOk && !verifySignature(ann.publicKey, signable, signature)) {
         return reply.code(403).send({ error: "Invalid signature" });
       }
     }
@@ -324,10 +325,10 @@ async function startPeerListener() {
     if (agentIdFromPublicKey(ann.publicKey) !== ann.from) {
       return reply.code(400).send({ error: "agentId mismatch" });
     }
-    upsertPeer(ann.from, ann.publicKey, {
-      alias: ann.alias, endpoints: ann.endpoints, capabilities: ann.capabilities,
+    upsertAgent(ann.from, ann.publicKey, {
+      alias: ann.alias, endpoints: ann.endpoints, capabilities: ann.capabilities, persist: true,
     });
-    return { ok: true, peers: getPeersForExchange(20) };
+    return { ok: true, peers: getAgentsForExchange(20) };
   });
 
   peerServer.post("/peer/message", async (req, reply) => {
@@ -354,12 +355,12 @@ async function startPeerListener() {
       if (worldId) broadcast(worldId, { type: "world.state", ...state });
     }
 
-    upsertPeer(msg.from, msg.publicKey, {});
     return { ok: true };
   });
 
   await peerServer.listen({ port: PEER_PORT, host: "::" });
   console.log(`[gateway] AWN peer listener on [::]:${PEER_PORT}`);
+  return peerServer
 }
 
 // ---------------------------------------------------------------------------
@@ -370,13 +371,28 @@ const app = Fastify({ logger: false });
 await app.register(cors, { origin: true });
 await app.register(websocketPlugin);
 
-app.get("/health", async () => ({
-  ok: true, ts: Date.now(), agentId: selfAgentId,
-  peers: peers.size, worlds: findByCapability("world:").length,
-}));
+app.get("/health", async () => {
+  const ts = Date.now()
+  const worlds = findByCapability("world:").length
+  const agents = registry.size
+  const registryAge = agents > 0 && _registryModifiedAt !== null
+    ? Math.max(0, ts - _registryModifiedAt)
+    : null
+  const status = worlds > 0 ? "ready" : agents > 0 ? "warming" : "empty"
+
+  return {
+    ok: true,
+    ts,
+    agentId: selfAgentId,
+    agents,
+    worlds,
+    registryAge,
+    status,
+  }
+});
 
 // Agent Card — served as canonical JSON so bytes on wire match the JWS signature
-let _cachedCardJson = null;
+let _cachedCardJson = null
 app.get("/.well-known/agent.json", async (_req, reply) => {
   if (!_cachedCardJson) {
     const cardUrl = PUBLIC_URL
@@ -393,7 +409,7 @@ app.get("/.well-known/agent.json", async (_req, reply) => {
 });
 
 app.get("/agents", async () => ({
-  agents: getPeersForExchange(100),
+  agents: getAgentsForExchange(100),
 }));
 
 app.get("/worlds", async () => {
@@ -497,13 +513,45 @@ app.get("/ws", { websocket: true }, (socket, req) => {
 // Startup
 // ---------------------------------------------------------------------------
 
-await startPeerListener();
-await app.listen({ port: HTTP_PORT, host: "::" });
-console.log(`[gateway] Public HTTP on [::]:${HTTP_PORT}`);
+async function shutdown(signal, peerServer) {
+  if (_shutdownPromise) return _shutdownPromise
 
-// Discovery
-setTimeout(discoverWorlds, 2_000);
-setInterval(discoverWorlds, DISCOVERY_INTERVAL_MS);
+  _shutdownPromise = (async () => {
+    console.log(`[gateway] Shutting down on ${signal}...`)
 
-// Prune stale peers every 5 minutes
-setInterval(() => pruneStale(), 5 * 60 * 1000);
+    if (_pruneTimer) {
+      clearInterval(_pruneTimer)
+      _pruneTimer = null
+    }
+
+    flushRegistry()
+
+    try {
+      await app.close()
+    } catch (error) {
+      console.warn("[gateway] Failed to close public server cleanly", error)
+    }
+
+    try {
+      await peerServer.close()
+    } catch (error) {
+      console.warn("[gateway] Failed to close peer server cleanly", error)
+    }
+  })()
+
+  return _shutdownPromise
+}
+
+loadRegistry()
+const peerServer = await startPeerListener()
+await app.listen({ port: HTTP_PORT, host: "::" })
+console.log(`[gateway] Public HTTP on [::]:${HTTP_PORT}`)
+
+// Prune stale agents every 3 minutes
+_pruneTimer = setInterval(() => pruneStaleAgents(), 3 * 60 * 1000)
+
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.once(signal, () => {
+    void shutdown(signal, peerServer)
+  })
+}

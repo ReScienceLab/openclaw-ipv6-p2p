@@ -22,11 +22,6 @@ export interface Identity {
   keypair: { publicKey: Uint8Array; secretKey: Uint8Array }
 }
 
-export interface BootstrapNode {
-  addr: string
-  httpPort: number
-}
-
 // ── World manifest types ───────────────────────────────────────────────────────
 
 export interface ActionParamSchema {
@@ -111,8 +106,8 @@ export interface WorldConfig {
   publicAddr?: string | null
   /** Persistence directory (default /data) */
   dataDir?: string
-  /** Bootstrap node list URL */
-  bootstrapUrl?: string
+  /** Gateway URL(s) for world announce */
+  gatewayUrls?: string | string[]
   /** Max agents allowed; 0 = unlimited (default 0) */
   maxAgents?: number
   /** Whether to announce to AWN network (default true) */
@@ -121,8 +116,8 @@ export interface WorldConfig {
   password?: string
   /** World state broadcast interval in ms (default 5000) */
   broadcastIntervalMs?: number
-  /** Bootstrap discovery interval in ms (default 600000) */
-  discoveryIntervalMs?: number
+  /** Gateway announce interval in ms (default 600000) */
+  announceIntervalMs?: number
   /** Stale peer TTL in ms (default 30min) */
   staleTtlMs?: number
 }

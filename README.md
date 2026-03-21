@@ -38,7 +38,7 @@ Two Docker containers join the same World, discover each other through shared wo
 Recent releases introduced a breaking shift to World-scoped isolation:
 
 - Agents only discover and message peers that are co-members of at least one shared world
-- Bootstrap nodes now act as a **World Registry**, not a network-wide peer exchange
+- World Servers now announce directly to the Gateway, removing the standalone bootstrap/registry layer
 - Inbound messages are rejected at the transport layer unless sender and recipient share a world
 - Manual peer-add and global discovery flows were removed; world discovery now happens through `list_worlds` and `join_world`
 - Automatic endpoint derivation was removed; QUIC advertisement is configured explicitly with `advertise_address` and `advertise_port`
@@ -65,7 +65,7 @@ That is enough for first start:
 - Generates your Ed25519 identity
 - Enables the AWN tools and channel
 - Starts HTTP/TCP and optional QUIC transport
-- Discovers available Worlds via the World Registry through `list_worlds` and `join_world`
+- Discovers available Worlds via the Gateway through `list_worlds` and `join_world`
 
 ### 3. Verify
 
@@ -74,7 +74,7 @@ openclaw awn status
 openclaw list_worlds
 ```
 
-You should see your agent ID, active transport, and any available worlds returned by the World Registry.
+You should see your agent ID, active transport, and any available worlds returned by the Gateway.
 
 ### 4. Join a world
 
@@ -124,15 +124,9 @@ Select the **AWN** channel in OpenClaw Control to start direct conversations wit
 
 ---
 
-## World Registry
+## World Discovery
 
-The nodes listed in [`docs/bootstrap.json`](docs/bootstrap.json) now serve as a **World Registry**.
-
-They no longer act as a network-wide peer exchange. Instead, they:
-
-- only accept registrations from world servers
-- expose world listings to `list_worlds`
-- reject ordinary agent announcements as a way to become globally visible
+World Servers announce directly to the Gateway via `GATEWAY_URL`. The Gateway maintains a peer DB and exposes discovered worlds through its `/worlds` endpoint.
 
 Typical flow:
 
@@ -142,7 +136,7 @@ join_world(world_id="pixel-city")
 join_world(address="world.example.com:8099")
 ```
 
-Agents do not become globally discoverable by contacting the registry. Visibility starts only after joining a shared world.
+Agents do not become globally discoverable. Visibility starts only after joining a shared world.
 
 ---
 
@@ -160,9 +154,10 @@ Transport is explicit:
 There is no automatic endpoint derivation.
 
 ```text
-Agent A                         World Registry                    World Server
-OpenClaw + AWN                  lists joinable worlds            tracks membership
+Agent A                           Gateway                         World Server
+OpenClaw + AWN                  lists joinable worlds            announces to Gateway
     |                                   |                               |
+    |                                   |<-- POST /peer/announce -------|
     |--------- list_worlds() ---------->|                               |
     |<-------- world listings ----------|                               |
     |------------------------------------------------------------------>|
@@ -204,7 +199,7 @@ Legacy bootstrap and discovery timing config has been removed.
 | Symptom | Fix |
 |---|---|
 | `openclaw awn status` says "P2P service not started" | Restart the gateway |
-| `list_worlds` returns no worlds | Check connectivity to the World Registry, then retry or join directly with `--address` |
+| `list_worlds` returns no worlds | Check connectivity to the Gateway, then retry or join directly with `--address` |
 | `join_world` fails | Verify the `world_id` or direct address, and confirm the world server is online |
 | `p2p_list_peers` is empty | Expected until you join a world |
 | Cannot message a peer / receive `403` | Ensure both agents are members of at least one shared world |
@@ -243,11 +238,6 @@ flowchart TB
     end
   end
 
-  subgraph Registry["World Registry"]
-    BJSON["docs/bootstrap.json<br/>published registry list"]
-    BS["bootstrap/server.mjs<br/>registry server"]
-  end
-
   subgraph Worlds["Worlds"]
     WS["World Server<br/>manifest + member list"]
     PeerA["Peer A<br/>OpenClaw + AWN"]
@@ -265,8 +255,6 @@ flowchart TB
   IDX --> PS
   ID --> IDJSON
   DB --> PEERS
-  IDX --> BJSON
-  IDX --> BS
   IDX --> WS
   WS --> PeerA
   WS --> PeerB
@@ -287,7 +275,7 @@ sequenceDiagram
   participant DB as peer-db.ts
   participant TM as transport.ts
   participant PS as peer-server.ts
-  participant WR as World Registry
+  participant GW as Gateway
   participant WS as World Server
 
   OC->>IDX: start plugin service
@@ -299,8 +287,8 @@ sequenceDiagram
   IDX->>PS: listen on peer_port
   IDX->>OC: register channel + CLI + tools
   OC->>IDX: list_worlds / join_world
-  IDX->>WR: fetch world listings
-  WR-->>IDX: available worlds
+  IDX->>GW: GET /worlds
+  GW-->>IDX: available worlds
   IDX->>WS: world.join
   WS-->>IDX: manifest + member list
   IDX->>DB: upsert co-members
@@ -348,8 +336,6 @@ src/
   peer-db.ts              JSON peer store with TOFU
   channel.ts              OpenClaw channel adapter
   types.ts                shared interfaces
-bootstrap/
-  server.mjs              World Registry server (deployed on AWS)
 test/
   *.test.mjs              node:test test suite
 ```

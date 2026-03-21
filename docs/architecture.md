@@ -36,7 +36,7 @@ An agent's identity is stable. Reachability is not.
 │ did:key · TOFU                              │
 ├──────────────────────────────────────────────┤
 │ Discovery Layer                             │
-│ World Registry · World membership           │
+│ Gateway announce · World membership         │
 │ Capability search                           │
 ├──────────────────────────────────────────────┤
 │ Transport Layer                             │
@@ -100,15 +100,15 @@ Peer bindings are cached as `agentId -> publicKey` with a configurable TTL.
 
 ## 3. Discovery Layer
 
-### 3.1 World Registry
+### 3.1 Gateway Discovery
 
-Registry nodes answer one question:
+World Servers announce directly to the Gateway. The Gateway answers one question:
 
 ```text
 What worlds can this agent join?
 ```
 
-They do not return general peer tables and they do not make ordinary agents globally visible.
+The Gateway does not return general peer tables and does not make ordinary agents globally visible.
 
 ### 3.2 Joined World State
 
@@ -122,7 +122,7 @@ Joined world state is tracked in `src/index.ts`:
 
 The peer database remains the local routing table, but world membership is now what populates it for remote agents.
 
-- `list_worlds()` merges registry results with cached `world:` capability entries
+- `list_worlds()` merges Gateway results with cached `world:` capability entries
 - `join_world()` stores the world server and member list in peer DB
 - the peer list only becomes useful after a world has been joined
 
@@ -132,7 +132,7 @@ Legacy network-wide discovery is gone. Discovery now works like this:
 
 ```text
 1. Agent starts and loads identity
-2. Agent queries the World Registry via list_worlds()
+2. Agent queries the Gateway via list_worlds()
 3. Agent joins a world via join_world(world_id) or join_world(address)
 4. World Server returns member list (agentId + alias + endpoints)
 5. Agent stores co-members in peer DB
@@ -191,7 +191,7 @@ This is the universal fallback path and the default world-join transport.
 2. Initialize peer DB and TOFU TTL
 3. Start transport manager and optional QUIC transport
 4. Start HTTP peer server and register tools + AWN channel
-5. No automatic bootstrap runs at startup; agent uses list_worlds / join_world tools
+5. No automatic discovery runs at startup; agent uses list_worlds / join_world tools
 6. World membership provides peer discovery through the member list returned on join
 7. World membership refresh keeps the routing table current every 30 seconds
 ```
@@ -252,12 +252,9 @@ Layer 4 is the main architectural change relative to the old global peer mesh.
 | `src/types.ts` | Shared identity, peer, transport, and config types |
 | `src/peer-discovery.ts` | **Removed**. Global gossip discovery no longer exists. |
 
-### 6.2 Registry And World Components
+### 6.2 Gateway And World Components
 
-| File | Purpose |
-|------|---------|
-| `bootstrap/server.mjs` | World Registry server deployed on AWS |
-| `docs/bootstrap.json` | Published list of World Registry nodes |
+World Servers announce directly to the Gateway. The standalone bootstrap/registry layer has been removed.
 
 ---
 

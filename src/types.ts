@@ -62,7 +62,7 @@ export interface PeerRecord {
 export interface DiscoveredPeerRecord extends PeerRecord {
   tofuCachedAt?: number   // timestamp when TOFU binding was first established
   discoveredVia?: string
-  source: "manual" | "bootstrap" | "gossip"
+  source: "manual" | "bootstrap" | "gossip" | "gateway"
   version?: string
 }
 

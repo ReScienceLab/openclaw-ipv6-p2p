@@ -21,7 +21,7 @@ afterEach(() => {
 describe("peer-db (agentId-keyed)", () => {
   it("upsertDiscoveredPeer stores by agentId", () => {
     const id = generateIdentity()
-    upsertDiscoveredPeer(id.agentId, id.publicKey, { source: "bootstrap" })
+    upsertDiscoveredPeer(id.agentId, id.publicKey, { source: "gateway" })
     const peer = getPeer(id.agentId)
     assert.ok(peer)
     assert.equal(peer.agentId, id.agentId)
@@ -31,7 +31,7 @@ describe("peer-db (agentId-keyed)", () => {
   it("getPeerIds returns agentIds", () => {
     const id1 = generateIdentity()
     const id2 = generateIdentity()
-    upsertDiscoveredPeer(id1.agentId, id1.publicKey, { source: "bootstrap" })
+    upsertDiscoveredPeer(id1.agentId, id1.publicKey, { source: "gateway" })
     upsertDiscoveredPeer(id2.agentId, id2.publicKey, { source: "gossip" })
     const ids = getPeerIds()
     assert.ok(ids.includes(id1.agentId))

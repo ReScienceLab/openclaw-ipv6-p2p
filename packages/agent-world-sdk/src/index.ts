@@ -22,11 +22,7 @@ export {
 export { buildSignedAgentCard, verifyAgentCard } from "./card.js";
 export type { AgentCardOpts } from "./card.js";
 export { PeerDb } from "./peer-db.js";
-export {
-  fetchBootstrapNodes,
-  announceToNode,
-  startDiscovery,
-} from "./bootstrap.js";
+export { announceToGateway, startGatewayAnnounce } from "./gateway-announce.js";
 export { registerPeerRoutes } from "./peer-protocol.js";
 export { createWorldServer } from "./world-server.js";
 export { WorldLedger } from "./world-ledger.js";
@@ -34,7 +30,6 @@ export type {
   Endpoint,
   PeerRecord,
   Identity,
-  BootstrapNode,
   ActionParamSchema,
   ActionSchema,
   WorldRule,

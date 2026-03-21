@@ -7,7 +7,7 @@
  */
 import * as nacl from "tweetnacl"
 import { P2PMessage, Identity, Endpoint } from "./types"
-import { signWithDomainSeparator, DOMAIN_SEPARATORS, signHttpRequest } from "./identity"
+import { signWithDomainSeparator, DOMAIN_SEPARATORS, signHttpRequest, verifyHttpResponseHeaders, agentIdFromPublicKey } from "./identity"
 import { Transport } from "./transport"
 
 function buildSignedMessage(identity: Identity, event: string, content: string): P2PMessage {
@@ -30,6 +30,7 @@ async function sendViaHttp(
   targetAddr: string,
   port: number,
   timeoutMs: number,
+  expectedPublicKey?: string,
   urlPath: string = "/peer/message",
 ): Promise<{ ok: boolean; error?: string; data?: Record<string, unknown> }> {
   const isIpv6 = targetAddr.includes(":") && !targetAddr.includes(".")
@@ -51,8 +52,20 @@ async function sendViaHttp(
       const text = await resp.text().catch(() => "")
       return { ok: false, error: `HTTP ${resp.status}: ${text}` }
     }
+    const bodyText = await resp.text()
+    if (expectedPublicKey) {
+      const verification = verifyHttpResponseHeaders(
+        Object.fromEntries(Array.from(resp.headers.entries()).map(([key, value]) => [key, value])),
+        resp.status,
+        bodyText,
+        expectedPublicKey
+      )
+      if (!verification.ok) {
+        return { ok: false, error: verification.error ?? "Invalid signed HTTP response" }
+      }
+    }
     try {
-      const data = await resp.json() as Record<string, unknown>
+      const data = JSON.parse(bodyText) as Record<string, unknown>
       return { ok: true, data }
     } catch {
       return { ok: true }
@@ -79,6 +92,7 @@ async function sendViaTransport(
 export interface SendOptions {
   endpoints?: Endpoint[]
   quicTransport?: Transport
+  expectedPublicKey?: string
 }
 
 export async function getPeerPingInfo(
@@ -106,11 +120,23 @@ export async function getPeerPingInfo(
     const resp = await fetch(url, { signal: ctrl.signal })
     clearTimeout(timer)
     if (!resp.ok) return { ok: false }
+    const bodyText = await resp.text()
     try {
-      const data = await resp.json() as Record<string, unknown>
+      const data = JSON.parse(bodyText) as Record<string, unknown>
+      const publicKey = typeof data.publicKey === "string" ? data.publicKey : ""
+      const agentId = typeof data.agentId === "string" ? data.agentId : ""
+      if (!publicKey || !agentId) return { ok: false }
+      const verification = verifyHttpResponseHeaders(
+        Object.fromEntries(Array.from(resp.headers.entries()).map(([key, value]) => [key, value])),
+        resp.status,
+        bodyText,
+        publicKey
+      )
+      if (!verification.ok) return { ok: false }
+      if (agentIdFromPublicKey(publicKey) !== agentId) return { ok: false }
       return { ok: true, data }
     } catch {
-      return { ok: true }
+      return { ok: false }
     }
   } catch {
     return { ok: false }
@@ -150,11 +176,11 @@ export async function sendP2PMessage(
       .filter((e) => e.transport === "tcp")
       .sort((a, b) => a.priority - b.priority)[0]
     if (httpEp) {
-      return sendViaHttp(msg, identity, httpEp.address, httpEp.port || port, timeoutMs)
+      return sendViaHttp(msg, identity, httpEp.address, httpEp.port || port, timeoutMs, opts.expectedPublicKey)
     }
   }
 
-  return sendViaHttp(msg, identity, targetAddr, port, timeoutMs)
+  return sendViaHttp(msg, identity, targetAddr, port, timeoutMs, opts?.expectedPublicKey)
 }
 
 export async function broadcastLeave(

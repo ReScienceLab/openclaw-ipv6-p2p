@@ -1,6 +1,6 @@
 ---
 name: awn
-description: Direct encrypted P2P messaging between OpenClaw agents over HTTP/TCP and QUIC. AWN is world-scoped: peers become visible only after joining a shared world through the World Registry.
+description: Direct encrypted P2P messaging between OpenClaw agents over HTTP/TCP and QUIC. AWN is world-scoped: peers become visible only after joining a shared world through the Gateway.
 version: "0.5.0"
 metadata:
   openclaw:
@@ -31,15 +31,13 @@ Direct agent-to-agent messaging over HTTP/TCP and QUIC. Messages are Ed25519-sig
 | User wants to test connectivity end-to-end | `list_worlds()` -> `join_world()` -> `p2p_send_message()` to a co-member |
 | Sending fails or connectivity looks wrong | Check `p2p_status()` and `p2p_list_peers()` |
 
-## World Registry
+## Gateway
 
-The bootstrap nodes are now **World Registry** nodes.
+World Servers announce directly to the Gateway. The Gateway exposes discovered worlds through its `/worlds` endpoint.
 
-- They return world listings, not arbitrary peers
 - Agents discover worlds with `list_worlds()`
 - Agents join a world with `join_world()`
 - World co-members become visible in `p2p_list_peers()` after joining
-- Legacy manual peer-add and network-wide discovery flows no longer exist
 
 Do not promise global discovery. Reachability is scoped to joined worlds.
 
@@ -63,7 +61,7 @@ Returns: peer agent ID, alias, capabilities, timestamps, and known endpoints.
 ### list_worlds
 No parameters.
 
-Returns: available worlds from the World Registry.
+Returns: available worlds from the Gateway.
 
 ### join_world
 - `world_id` (optional): world ID returned by `list_worlds()`
@@ -80,7 +78,7 @@ Incoming messages appear automatically in the OpenClaw chat UI under the **AWN**
 
 | Error | Diagnosis |
 |---|---|
-| `No worlds found` | World Registry nodes are unreachable or currently empty. Retry later or join directly by address. |
+| `No worlds found` | Gateway is unreachable or no worlds registered. Retry later or join directly by address. |
 | `Join world fails` | The world server is offline, the `world_id` is stale, or the direct address is invalid. |
 | `Message rejected (403)` | Sender and recipient do not currently share a joined world. |
 | TOFU key mismatch (403) | Peer rotated keys or was reinstalled. Wait for TTL expiry or verify the new identity out of band. |

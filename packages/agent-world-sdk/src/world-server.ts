@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import { loadOrCreateIdentity } from "./identity.js";
 import { PeerDb } from "./peer-db.js";
 import { registerPeerRoutes } from "./peer-protocol.js";
-import { startDiscovery } from "./bootstrap.js";
+import { startGatewayAnnounce } from "./gateway-announce.js";
 import {
   canonicalize,
   signPayload,
@@ -21,9 +21,6 @@ import type {
   Endpoint,
   LedgerQueryOpts,
 } from "./types.js";
-
-const DEFAULT_BOOTSTRAP_URL =
-  "https://resciencelab.github.io/agent-world-network/bootstrap.json";
 
 /**
  * Start a fully-wired AWN World Agent server.
@@ -52,12 +49,12 @@ export async function createWorldServer(
     publicPort,
     publicAddr = null,
     dataDir = "/data",
-    bootstrapUrl = DEFAULT_BOOTSTRAP_URL,
+    gatewayUrls,
     maxAgents = 0,
     isPublic = true,
     password = "",
     broadcastIntervalMs = 5_000,
-    discoveryIntervalMs = 10 * 60 * 1000,
+    announceIntervalMs = 10 * 60 * 1000,
     staleTtlMs = 30 * 60 * 1000,
     setupRoutes,
     cardUrl,
@@ -342,24 +339,24 @@ export async function createWorldServer(
     if (pruned > 0) console.log(`[world] Pruned ${pruned} stale peer(s)`);
   }, 5 * 60 * 1000);
 
-  // Bootstrap discovery
-  let stopDiscovery: (() => void) | undefined;
+  // Gateway announce
+  let stopAnnounce: (() => void) | undefined;
   if (isPublic) {
-    stopDiscovery = await startDiscovery({
+    stopAnnounce = await startGatewayAnnounce({
       identity,
       alias: worldName,
       publicAddr,
       publicPort: resolvedPublicPort,
       capabilities: [`world:${worldId}`],
       peerDb,
-      bootstrapUrl,
-      intervalMs: discoveryIntervalMs,
+      gatewayUrls,
+      intervalMs: announceIntervalMs,
       onDiscovery: (n) =>
-        console.log(`[world] Discovery complete — ${n} peer(s)`),
+        console.log(`[world] Announce complete — ${n} peer(s)`),
     });
-    console.log(`[world] Public mode — announcing to AWN network`);
+    console.log(`[world] Public mode — announcing to Gateway`);
   } else {
-    console.log(`[world] Private mode — skipping AWN network announce`);
+    console.log(`[world] Private mode — skipping Gateway announce`);
   }
 
   return {
@@ -370,7 +367,7 @@ export async function createWorldServer(
       clearInterval(broadcastTimer);
       clearInterval(evictionTimer);
       clearInterval(pruneTimer);
-      stopDiscovery?.();
+      stopAnnounce?.();
       await fastify.close();
     },
   };

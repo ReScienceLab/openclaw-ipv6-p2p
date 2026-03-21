@@ -1,32 +1,13 @@
 import {
   canonicalize,
-  signPayload,
   signHttpRequest,
   DOMAIN_SEPARATORS,
   signWithDomainSeparator,
 } from "./crypto.js";
-import type { BootstrapNode, Identity } from "./types.js";
+import type { Identity } from "./types.js";
 import type { PeerDb } from "./peer-db.js";
 
-const DEFAULT_BOOTSTRAP_URL =
-  "https://resciencelab.github.io/agent-world-network/bootstrap.json";
-
-export async function fetchBootstrapNodes(
-  url = DEFAULT_BOOTSTRAP_URL
-): Promise<BootstrapNode[]> {
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-    if (!resp.ok) return [];
-    const data = (await resp.json()) as {
-      bootstrap_nodes?: Array<{ addr: string; httpPort?: number }>;
-    };
-    return (data.bootstrap_nodes ?? [])
-      .filter((n) => n.addr)
-      .map((n) => ({ addr: n.addr, httpPort: n.httpPort ?? 8099 }));
-  } catch {
-    return [];
-  }
-}
+const DEFAULT_GATEWAY_URL = "http://localhost:8099";
 
 export interface AnnounceOpts {
   identity: Identity;
@@ -38,9 +19,8 @@ export interface AnnounceOpts {
   peerDb: PeerDb;
 }
 
-export async function announceToNode(
-  addr: string,
-  httpPort: number,
+export async function announceToGateway(
+  gatewayUrl: string,
   opts: AnnounceOpts
 ): Promise<void> {
   const {
@@ -52,10 +32,8 @@ export async function announceToNode(
     capabilities,
     peerDb,
   } = opts;
-  const isIpv6 = addr.includes(":") && !addr.includes(".");
-  const url = isIpv6
-    ? `http://[${addr}]:${httpPort}/peer/announce`
-    : `http://${addr}:${httpPort}/peer/announce`;
+
+  const url = `${gatewayUrl.replace(/\/+$/, "")}/peer/announce`;
 
   const endpoints = publicAddr
     ? [
@@ -122,36 +100,45 @@ export async function announceToNode(
       }
     }
   } catch {
-    // bootstrap node unreachable — skip silently
+    // gateway unreachable — skip silently
   }
 }
 
-export interface DiscoveryOpts extends AnnounceOpts {
-  bootstrapUrl?: string;
+export interface GatewayAnnounceOpts extends AnnounceOpts {
+  gatewayUrls?: string | string[];
   intervalMs?: number;
   onDiscovery?: (peerCount: number) => void;
 }
 
 /**
- * Announce to all bootstrap nodes once, then schedule repeating discovery.
+ * Announce to all gateway URLs once, then schedule repeating announcements.
  * Returns a cleanup function that cancels the interval.
  */
-export async function startDiscovery(opts: DiscoveryOpts): Promise<() => void> {
-  const { bootstrapUrl, intervalMs = 10 * 60 * 1000, onDiscovery } = opts;
+export async function startGatewayAnnounce(opts: GatewayAnnounceOpts): Promise<() => void> {
+  const { gatewayUrls, intervalMs = 10 * 60 * 1000, onDiscovery } = opts;
 
-  async function runDiscovery() {
-    const nodes = await fetchBootstrapNodes(bootstrapUrl);
+  // Resolve gateway URLs from string, string[], or comma-separated string
+  let urls: string[];
+  if (Array.isArray(gatewayUrls)) {
+    urls = gatewayUrls;
+  } else if (typeof gatewayUrls === "string") {
+    urls = gatewayUrls.split(",").map((u) => u.trim()).filter(Boolean);
+  } else {
+    urls = [DEFAULT_GATEWAY_URL];
+  }
+
+  async function runAnnounce() {
     await Promise.allSettled(
-      nodes.map((n) => announceToNode(n.addr, n.httpPort, opts))
+      urls.map((u) => announceToGateway(u, opts))
     );
     onDiscovery?.(opts.peerDb.size);
   }
 
   let startupTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
     startupTimer = undefined;
-    void runDiscovery();
+    void runAnnounce();
   }, 3_000);
-  const timer = setInterval(runDiscovery, intervalMs);
+  const timer = setInterval(runAnnounce, intervalMs);
   return () => {
     if (startupTimer) {
       clearTimeout(startupTimer);

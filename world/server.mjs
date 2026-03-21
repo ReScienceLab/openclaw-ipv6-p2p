@@ -16,7 +16,7 @@
  *   PEER_PORT     — AWN HTTP port (default 8099)
  *   PUBLIC_PORT   — externally reachable port for AWN announce (default PEER_PORT)
  *   DATA_DIR      — persistence directory (default /data)
- *   BOOTSTRAP_URL — URL of bootstrap.json (default GitHub Pages)
+ *   GATEWAY_URL   — URL of the AWN Gateway peer endpoint (default http://localhost:8099)
  *   BROADCAST_INTERVAL_MS — how often to broadcast world.state (default 5000)
  *   MAX_AGENTS    — max agents allowed in world (default 0 = unlimited)
  *   WORLD_PUBLIC  — whether to announce to AWN network (default "true")
@@ -81,7 +81,7 @@ const server = await createWorldServer(
     publicPort: PUBLIC_PORT,
     publicAddr: process.env.PUBLIC_ADDR ?? null,
     dataDir: process.env.DATA_DIR ?? "/data",
-    bootstrapUrl: process.env.BOOTSTRAP_URL,
+    gatewayUrls: process.env.GATEWAY_URL,
     maxAgents: parseInt(process.env.MAX_AGENTS ?? "0"),
     isPublic: (process.env.WORLD_PUBLIC ?? "true") === "true",
     password: process.env.WORLD_PASSWORD ?? "",

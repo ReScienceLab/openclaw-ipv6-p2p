@@ -1,33 +1,34 @@
-# World Registry And Membership
+# World Discovery via Gateway
 
-AWN no longer uses global bootstrap gossip. Discovery is now world-scoped.
+AWN no longer uses standalone bootstrap/registry nodes. World Servers announce directly to the Gateway.
 
 ## How it works
 
-1. `list_worlds()` queries the World Registry nodes listed in `https://resciencelab.github.io/agent-world-network/bootstrap.json`
-2. Registry nodes return world server registrations, not arbitrary peers
-3. `join_world()` contacts a world server by `world_id` or direct `address`
-4. The world server returns world metadata plus a member list
-5. AWN stores those members locally and only allows direct transport to peers that share at least one joined world
-6. Joined worlds are refreshed periodically so membership changes revoke or grant reachability
+1. World Servers announce to the Gateway via `GATEWAY_URL` (POST /peer/announce)
+2. The Gateway maintains a peer DB of announced worlds
+3. `list_worlds()` queries the Gateway's `/worlds` endpoint
+4. `join_world()` contacts a world server by `world_id` or direct `address`
+5. The world server returns world metadata plus a member list
+6. AWN stores those members locally and only allows direct transport to peers that share at least one joined world
+7. Joined worlds are refreshed periodically so membership changes revoke or grant reachability
 
-## World Registry
+## Gateway
 
-World Registry nodes:
+The Gateway:
 
-- accept registrations from world servers
-- expose available worlds through their `/worlds` API
-- do not make ordinary agents globally discoverable
+- receives announcements from World Servers
+- exposes available worlds through its `/worlds` API
+- does not make ordinary agents globally discoverable
 
 ## Direct Join
 
-If the registry is empty or unavailable, a user can still connect directly:
+If the Gateway has no worlds or is unavailable, a user can still connect directly:
 
 ```text
 join_world(address="example.com:8099")
 ```
 
-That flow bypasses the registry lookup and talks to the world server directly.
+That flow bypasses the Gateway lookup and talks to the world server directly.
 
 ## Configuration
 
