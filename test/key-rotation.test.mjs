@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url)
 const pkgVersion = require("../package.json").version
 const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
 
-const { startPeerServer, stopPeerServer } = await import("../dist/peer-server.js")
+const { startPeerServer, stopPeerServer, addWorldMembers } = await import("../dist/peer-server.js")
 const { initDb } = await import("../dist/peer-db.js")
 const { agentIdFromPublicKey, signWithDomainSeparator, DOMAIN_SEPARATORS, signHttpRequest, canonicalize } = await import("../dist/identity.js")
 
@@ -106,9 +106,10 @@ describe("key rotation endpoint", () => {
     fs.rmSync(tmpDir, { recursive: true })
   })
 
-  test("accepts valid key rotation", async () => {
+  test("accepts valid key rotation from co-member", async () => {
     const oldKey = makeKeypair()
     const newKey = makeKeypair()
+    addWorldMembers("test-world", [oldKey.agentId])
     const resp = await fetch(`http://[::1]:${port}/peer/key-rotation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -117,6 +118,19 @@ describe("key rotation endpoint", () => {
     assert.equal(resp.status, 200)
     const json = await resp.json()
     assert.equal(json.ok, true)
+  })
+
+  test("rejects key rotation from unknown agent", async () => {
+    const oldKey = makeKeypair()
+    const newKey = makeKeypair()
+    const resp = await fetch(`http://[::1]:${port}/peer/key-rotation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(makeRotationBody(oldKey, newKey)),
+    })
+    assert.equal(resp.status, 403)
+    const json = await resp.json()
+    assert.match(json.error, /Unknown agent/)
   })
 
   test("rejects invalid old key proof", async () => {
@@ -135,6 +149,7 @@ describe("key rotation endpoint", () => {
     const oldKey = makeKeypair()
     const newKey = makeKeypair()
     const otherKey = makeKeypair()
+    addWorldMembers("test-world", [otherKey.agentId])
     const signable = {
       agentId: otherKey.agentId,
       oldPublicKey: oldKey.publicKey,
@@ -185,7 +200,8 @@ describe("key rotation endpoint", () => {
     const attackerKey = makeKeypair()
     const newKey = makeKeypair()
 
-    // Establish TOFU for tofuKey by sending a -signed message
+    // Register as co-member so message goes through, establishing TOFU
+    addWorldMembers("test-world", [tofuKey.agentId])
     const msgPayload = {
       from: tofuKey.agentId,
       publicKey: tofuKey.publicKey,

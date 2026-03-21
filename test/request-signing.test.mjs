@@ -22,7 +22,7 @@ const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
 
 const nacl = (await import("tweetnacl")).default
 
-const { startPeerServer, stopPeerServer } = await import("../dist/peer-server.js")
+const { startPeerServer, stopPeerServer, addWorldMembers } = await import("../dist/peer-server.js")
 const { initDb, flushDb } = await import("../dist/peer-db.js")
 const {
   agentIdFromPublicKey,
@@ -64,6 +64,7 @@ describe("request signing", () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "dap-reqsign-"))
     initDb(dataDir)
     await startPeerServer(PORT, { identity: selfKey, testMode: true })
+    addWorldMembers("test-world", [senderKey.agentId])
   })
 
   after(async () => {
@@ -235,30 +236,13 @@ describe("request signing", () => {
     assert.equal(resp.status, 403)
   })
 
-  test("announce with headers is accepted", async () => {
-    const timestamp = Date.now()
-    const payload = {
-      from: senderKey.agentId,
-      publicKey: senderKey.publicKey,
-      alias: "test-node",
-      endpoints: [],
-      capabilities: [],
-      timestamp,
-      peers: [],
-    }
-    const signature = signMessage(senderKey.privateKey, payload)
-    const announcement = { ...payload, signature }
-    const body = JSON.stringify(announcement)
-    const awHeaders = signHttpRequest(senderKey, "POST", `[::1]:${PORT}`, "/peer/announce", body)
-
-    const resp = await fetch(`http://[::1]:${PORT}/peer/announce`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...awHeaders },
-      body,
-    })
-    assert.equal(resp.status, 200)
-    const result = await resp.json()
-    assert.ok(result.ok || result.peers)
+  test("removed routes return 404", async () => {
+    const resp1 = await fetch(`http://[::1]:${PORT}/peer/announce`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+    assert.equal(resp1.status, 404)
+    const resp2 = await fetch(`http://[::1]:${PORT}/peer/inbox`)
+    assert.equal(resp2.status, 404)
+    const resp3 = await fetch(`http://[::1]:${PORT}/peer/peers`)
+    assert.equal(resp3.status, 404)
   })
 
   test("response includes signing headers", async () => {

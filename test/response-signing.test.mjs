@@ -101,12 +101,26 @@ describe("P2a — response signing on /peer/* endpoints", () => {
     assert.ok(result.ok, `Response signature invalid: ${JSON.stringify(result)}`)
   })
 
-  test("/peer/peers response has valid AgentWorld signature headers", async () => {
-    const resp = await fetch(`http://[::1]:${PORT}/peer/peers`)
-    const body = await resp.text()
-    assert.equal(resp.status, 200)
-    const result = verifyResponseSig(resp.headers, 200, body, selfKey.publicKey)
-    assert.ok(result.ok, `Response signature invalid: ${JSON.stringify(result)}`)
+  test("/peer/message error response (non-co-member) has valid signature", async () => {
+    const otherKey = makeKeypair()
+    const body = JSON.stringify({
+      from: otherKey.agentId,
+      publicKey: otherKey.publicKey,
+      event: "chat",
+      content: "test",
+      timestamp: Date.now(),
+    })
+    const { signHttpRequest } = await import("../dist/identity.js")
+    const awHeaders = signHttpRequest(otherKey, "POST", `[::1]:${PORT}`, "/peer/message", body)
+    const resp = await fetch(`http://[::1]:${PORT}/peer/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...awHeaders },
+      body,
+    })
+    const respBody = await resp.text()
+    assert.equal(resp.status, 403)
+    const result = verifyResponseSig(resp.headers, 403, respBody, selfKey.publicKey)
+    assert.ok(result.ok, `Error response signature invalid: ${JSON.stringify(result)}`)
   })
 
   test("/peer/message error response has valid signature", async () => {

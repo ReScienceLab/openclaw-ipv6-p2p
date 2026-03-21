@@ -9,7 +9,7 @@ import * as path from "path"
 import { execSync } from "child_process"
 import { loadOrCreateIdentity, deriveDidKey } from "./identity"
 import { initDb, listPeers, getPeer, flushDb, getPeerIds, getEndpointAddress, setTofuTtl, findPeersByCapability } from "./peer-db"
-import { startPeerServer, stopPeerServer, getInbox, setSelfMeta, handleUdpMessage } from "./peer-server"
+import { startPeerServer, stopPeerServer, setSelfMeta, handleUdpMessage, addWorldMembers, removeWorld, clearWorldMembers } from "./peer-server"
 import { sendP2PMessage, pingPeer, broadcastLeave, SendOptions } from "./peer-client"
 import { upsertDiscoveredPeer } from "./peer-db"
 import { buildChannel, wireInboundToGateway, CHANNEL_CONFIG_SCHEMA } from "./channel"
@@ -89,14 +89,17 @@ async function refreshWorldMembers(): Promise<void> {
       })
       if (!resp.ok) continue
       const body = await resp.json() as { members?: Array<{ agentId: string; alias?: string; endpoints?: Endpoint[] }> }
+      const memberIds: string[] = []
       for (const member of body.members ?? []) {
         if (member.agentId === identity!.agentId) continue
+        memberIds.push(member.agentId)
         upsertDiscoveredPeer(member.agentId, "", {
           alias: member.alias,
           endpoints: member.endpoints,
           source: "gossip",
         })
       }
+      addWorldMembers(worldId, memberIds)
     } catch { /* world unreachable — skip */ }
   }
 }
@@ -199,6 +202,7 @@ export default function register(api: any) {
         _memberRefreshTimer = null
       }
       _joinedWorlds.clear()
+      clearWorldMembers()
       if (identity) {
         await broadcastLeave(identity, listPeers(), peerPort, buildSendOpts())
       }
@@ -275,7 +279,7 @@ export default function register(api: any) {
           }
           console.log(`Peer port:      ${peerPort}`)
           console.log(`Known peers:    ${listPeers().length}`)
-          console.log(`Inbox messages: ${getInbox().length}`)
+          console.log(`Worlds joined:  ${_joinedWorlds.size}`)
         })
 
       p2p
@@ -324,18 +328,16 @@ export default function register(api: any) {
         })
 
       p2p
-        .command("inbox")
-        .description("Show received messages")
+        .command("worlds")
+        .description("Show joined worlds")
         .action(() => {
-          const msgs = getInbox()
-          if (msgs.length === 0) {
-            console.log("No messages received yet.")
+          if (_joinedWorlds.size === 0) {
+            console.log("Not joined any worlds yet. Use 'openclaw join_world <id>' to join one.")
             return
           }
-          console.log("=== Inbox ===")
-          for (const m of msgs.slice(0, 20)) {
-            const time = new Date(m.receivedAt).toLocaleTimeString()
-            console.log(`  [${time}] from ${m.from}: ${m.content}`)
+          console.log("=== Joined Worlds ===")
+          for (const [id, info] of _joinedWorlds) {
+            console.log(`  ${id} — ${info.address}:${info.port}`)
           }
         })
     },
@@ -358,7 +360,7 @@ export default function register(api: any) {
           `Transport: ${activeTransport?.id ?? "http-only"}`,
           ...(_quicTransport?.isActive() ? [`QUIC: \`${_quicTransport.address}\``] : []),
           `Peers: ${peers.length} known`,
-          `Inbox: ${getInbox().length} messages`,
+          `Worlds: ${_joinedWorlds.size} joined`,
         ].join("\n"),
       }
     },
@@ -443,7 +445,6 @@ export default function register(api: any) {
         return { content: [{ type: "text", text: "P2P service not started." }] }
       }
       const peers = listPeers()
-      const inbox = getInbox()
       const activeTransport = _transportManager?.active
       const lines = [
         ...((_agentMeta.name) ? [`Agent name: ${_agentMeta.name}`] : []),
@@ -453,7 +454,7 @@ export default function register(api: any) {
         ...(_quicTransport?.isActive() ? [`QUIC endpoint: ${_quicTransport.address}`] : []),
         `Plugin version: v${_agentMeta.version}`,
         `Known peers: ${peers.length}`,
-        `Unread inbox: ${inbox.length} messages`,
+        `Worlds joined: ${_joinedWorlds.size}`,
       ]
       return { content: [{ type: "text", text: lines.join("\n") }] }
     },
@@ -582,10 +583,13 @@ export default function register(api: any) {
         return { content: [{ type: "text", text: `Failed to join world: ${result.error}` }], isError: true }
       }
 
-      // Populate peer DB from members list in join response
+      // Populate peer DB + world membership allowlist from members list
+      const worldId = (result.data?.worldId ?? params.world_id ?? params.address) as string
+      const memberIds: string[] = [worldAgentId!]
       if (result.data?.members && Array.isArray(result.data.members)) {
         for (const member of result.data.members as Array<{ agentId: string; alias?: string; endpoints?: Endpoint[] }>) {
           if (member.agentId === identity.agentId) continue
+          memberIds.push(member.agentId)
           upsertDiscoveredPeer(member.agentId, "", {
             alias: member.alias,
             endpoints: member.endpoints,
@@ -593,8 +597,7 @@ export default function register(api: any) {
           })
         }
       }
-
-      const worldId = (result.data?.worldId ?? params.world_id ?? params.address) as string
+      addWorldMembers(worldId, memberIds)
       const members = result.data?.members as unknown[] | undefined
       const memberCount = members?.length ?? 0
 

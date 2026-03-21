@@ -125,6 +125,10 @@ export function registerPeerRoutes(
         ann.publicKey as string
       );
       if (!result.ok) return reply.code(403).send({ error: result.error });
+      const headerFrom = req.headers["x-agentworld-from"] as string;
+      if (headerFrom !== ann.from) {
+        return reply.code(400).send({ error: "X-AgentWorld-From does not match body from" });
+      }
     } else {
       const { signature, ...signable } = ann;
       if (
@@ -171,6 +175,10 @@ export function registerPeerRoutes(
         msg.publicKey as string
       );
       if (!result.ok) return reply.code(403).send({ error: result.error });
+      const headerFrom = req.headers["x-agentworld-from"] as string;
+      if (headerFrom !== msg.from) {
+        return reply.code(400).send({ error: "X-AgentWorld-From does not match body from" });
+      }
     } else {
       const { signature, ...signable } = msg;
       if (
