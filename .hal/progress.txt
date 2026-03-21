@@ -4,6 +4,7 @@
 - In `gateway/server.mjs`, keep peer-protocol response payloads backward compatible even when internal registry helpers are renamed; `/peer/peers` and `/peer/announce` still emit `peers`.
 - Gateway registry persistence lives in `gateway/server.mjs` as a self-contained `$DATA_DIR/registry.json` helper: load on startup, filter out entries older than `STALE_TTL_MS`, and write atomically through `registry.json.tmp` + rename.
 - In `gateway/server.mjs`, registry persistence side effects should stay explicit: announce-driven `upsertAgent()` calls opt into debounced saves, while prune/shutdown paths use `flushRegistry()` for immediate durability.
+- In `gateway/server.mjs`, `/peer/message` is relay-only: it should verify and forward `world.state` payloads, but registry membership must come only from `/peer/announce`.
 
 (Add reusable patterns discovered during implementation here)
 
@@ -33,4 +34,12 @@
   - `upsertAgent()` is now the mutation gate for registry writes; callers that should persist need to opt in explicitly so relay-only code paths do not dirty the on-disk registry.
   - Prune is the right place to use `flushRegistry()` instead of `saveRegistry()` because stale removals should be durable before the next announce arrives.
   - The gateway startup order already satisfies persistence recovery requirements: `loadRegistry()` runs before the peer and public listeners begin serving traffic.
+---
+## 2026-03-21 16:58:52 UTC - US-004
+- Removed the `/peer/message` registry upsert in `gateway/server.mjs` so message-only senders no longer create empty registry records, and tightened stale cleanup defaults to a 15-minute TTL with a 3-minute prune interval.
+- Files changed: `gateway/server.mjs`, `.hal/prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - `POST /peer/message` should stay side-effect free for registry state; the gateway registry is sourced from announce traffic only, while `world.state` delivery remains a best-effort WebSocket relay.
+  - The gateway's stale-cleanup timing is intentionally tighter than the world announce interval tradeoff: 15-minute TTL plus a 3-minute prune loop reduces dead-world linger without changing endpoint schemas.
+  - This story did not require an `AGENTS.md` update because the reusable pattern is already captured in `Codebase Patterns`, and the gateway hardening scope remains centered on `gateway/server.mjs`.
 ---

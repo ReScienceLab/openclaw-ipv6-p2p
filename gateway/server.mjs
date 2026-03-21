@@ -49,7 +49,7 @@ const HTTP_PORT = parseInt(process.env.HTTP_PORT ?? "8100")
 const PUBLIC_ADDR = process.env.PUBLIC_ADDR ?? null
 const PUBLIC_URL = process.env.PUBLIC_URL ?? null // e.g. https://gateway.example.com
 const DATA_DIR = process.env.DATA_DIR ?? "/data"
-const STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(30 * 60 * 1000)) // 30 min
+const STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(15 * 60 * 1000)) // 15 min
 const MAX_AGENTS = 500
 const REGISTRY_VERSION = 1
 const REGISTRY_PATH = path.join(DATA_DIR, "registry.json")
@@ -344,7 +344,6 @@ async function startPeerListener() {
       if (worldId) broadcast(worldId, { type: "world.state", ...state });
     }
 
-    upsertAgent(msg.from, msg.publicKey, {});
     return { ok: true };
   });
 
@@ -492,5 +491,5 @@ await startPeerListener()
 await app.listen({ port: HTTP_PORT, host: "::" })
 console.log(`[gateway] Public HTTP on [::]:${HTTP_PORT}`)
 
-// Prune stale agents every 5 minutes
-setInterval(() => pruneStaleAgents(), 5 * 60 * 1000)
+// Prune stale agents every 3 minutes
+setInterval(() => pruneStaleAgents(), 3 * 60 * 1000)
