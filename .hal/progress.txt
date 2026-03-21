@@ -2,6 +2,7 @@
 
 ## Codebase Patterns
 - In `gateway/server.mjs`, keep peer-protocol response payloads backward compatible even when internal registry helpers are renamed; `/peer/peers` and `/peer/announce` still emit `peers`.
+- Gateway registry persistence lives in `gateway/server.mjs` as a self-contained `$DATA_DIR/registry.json` helper: load on startup, filter out entries older than `STALE_TTL_MS`, and write atomically through `registry.json.tmp` + rename.
 
 (Add reusable patterns discovered during implementation here)
 
@@ -14,4 +15,13 @@
   - `gateway/server.mjs` still exposes peer-protocol compatibility fields like `peers` on `/peer/peers` and `/peer/announce`; internal naming can diverge from wire naming.
   - The gateway hardening work is currently isolated to `gateway/server.mjs`; no build step or extra files are needed for gateway-specific runtime changes.
   - Follow the repo verification order literally: run `npm run build` before `node --test test/*.test.mjs` because tests import from `dist/`.
+---
+
+## 2026-03-21 17:03:56 UTC - US-002
+- Added self-contained registry persistence helpers to `gateway/server.mjs`: startup load with stale filtering, debounced save, immediate flush, and atomic temp-file writes to `$DATA_DIR/registry.json`.
+- Files changed: `gateway/server.mjs`, `.hal/prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - The gateway can safely warn and continue with an empty registry when `registry.json` is missing or malformed; startup recovery should stay best-effort rather than fail closed.
+  - Atomic persistence in this service should use synchronous `fs.writeFileSync()` to `registry.json.tmp` followed by `fs.renameSync()` because the gateway has no build step or extra infrastructure for async lifecycle coordination.
+  - `loadRegistry()` needs to run before the listeners start so `/worlds` can recover persisted entries immediately after process restart.
 ---

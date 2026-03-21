@@ -25,10 +25,12 @@
  *   PUBLIC_ADDR       — own public IP/hostname for AWN announce
  *   DATA_DIR          — identity persistence (default /data)
  */
-import Fastify from "fastify";
-import websocketPlugin from "@fastify/websocket";
-import cors from "@fastify/cors";
-import nacl from "tweetnacl";
+import fs from "node:fs"
+import path from "node:path"
+import Fastify from "fastify"
+import websocketPlugin from "@fastify/websocket"
+import cors from "@fastify/cors"
+import nacl from "tweetnacl"
 import {
   agentIdFromPublicKey,
   canonicalize,
@@ -40,39 +42,119 @@ import {
   buildSignedAgentCard,
   verifyWithDomainSeparator,
   DOMAIN_SEPARATORS,
-} from "@resciencelab/agent-world-sdk";
+} from "@resciencelab/agent-world-sdk"
 
-const PEER_PORT = parseInt(process.env.PEER_PORT ?? "8099");
-const HTTP_PORT = parseInt(process.env.HTTP_PORT ?? "8100");
-const PUBLIC_ADDR = process.env.PUBLIC_ADDR ?? null;
-const PUBLIC_URL = process.env.PUBLIC_URL ?? null; // e.g. https://gateway.example.com
-const DATA_DIR = process.env.DATA_DIR ?? "/data";
-const STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(30 * 60 * 1000)); // 30 min
-const MAX_AGENTS = 500;
+const PEER_PORT = parseInt(process.env.PEER_PORT ?? "8099")
+const HTTP_PORT = parseInt(process.env.HTTP_PORT ?? "8100")
+const PUBLIC_ADDR = process.env.PUBLIC_ADDR ?? null
+const PUBLIC_URL = process.env.PUBLIC_URL ?? null // e.g. https://gateway.example.com
+const DATA_DIR = process.env.DATA_DIR ?? "/data"
+const STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(30 * 60 * 1000)) // 30 min
+const MAX_AGENTS = 500
+const REGISTRY_VERSION = 1
+const REGISTRY_PATH = path.join(DATA_DIR, "registry.json")
+const REGISTRY_TMP_PATH = `${REGISTRY_PATH}.tmp`
+const SAVE_DEBOUNCE_MS = 1000
 
 // ---------------------------------------------------------------------------
 // Identity (loaded via agent-world-sdk)
 // ---------------------------------------------------------------------------
 
-const identity = loadOrCreateIdentity(DATA_DIR, "gateway-identity");
-const selfPubB64 = identity.pubB64;
-const selfAgentId = identity.agentId;
+const identity = loadOrCreateIdentity(DATA_DIR, "gateway-identity")
+const selfPubB64 = identity.pubB64
+const selfAgentId = identity.agentId
 
-console.log(`[gateway] agentId=${selfAgentId}`);
+console.log(`[gateway] agentId=${selfAgentId}`)
 
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
-const registry = new Map(); // agentId -> PeerRecord
+const registry = new Map() // agentId -> PeerRecord
+let _saveTimer = null
+
+function writeRegistry() {
+  fs.mkdirSync(DATA_DIR, { recursive: true })
+  const payload = {
+    version: REGISTRY_VERSION,
+    savedAt: Date.now(),
+    agents: Object.fromEntries([...registry.entries()]),
+  }
+  fs.writeFileSync(REGISTRY_TMP_PATH, JSON.stringify(payload, null, 2))
+  fs.renameSync(REGISTRY_TMP_PATH, REGISTRY_PATH)
+}
+
+function loadRegistry() {
+  if (!fs.existsSync(REGISTRY_PATH)) {
+    console.warn(`[gateway] Registry file missing at ${REGISTRY_PATH}; starting with empty registry`)
+    registry.clear()
+    return
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(REGISTRY_PATH, "utf8"))
+    if (raw?.version !== REGISTRY_VERSION || !raw?.agents || typeof raw.agents !== "object") {
+      throw new Error("invalid registry schema")
+    }
+
+    registry.clear()
+    const cutoff = Date.now() - STALE_TTL_MS
+    let loaded = 0
+    let discarded = 0
+
+    for (const [agentId, record] of Object.entries(raw.agents)) {
+      if (!record || typeof record !== "object") {
+        discarded++
+        continue
+      }
+      const lastSeen = typeof record.lastSeen === "number" ? record.lastSeen : 0
+      if (lastSeen < cutoff) {
+        discarded++
+        continue
+      }
+      registry.set(agentId, record)
+      loaded++
+    }
+
+    console.log(`[gateway] Loaded ${loaded} agents from registry (discarded ${discarded} stale)`)
+  } catch (error) {
+    console.warn(`[gateway] Failed to load registry from ${REGISTRY_PATH}; starting with empty registry`, error)
+    registry.clear()
+  }
+}
+
+function saveRegistry() {
+  if (_saveTimer) return
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null
+    try {
+      writeRegistry()
+    } catch (error) {
+      console.warn(`[gateway] Failed to save registry to ${REGISTRY_PATH}`, error)
+    }
+  }, SAVE_DEBOUNCE_MS)
+}
+
+function flushRegistry() {
+  if (_saveTimer) {
+    clearTimeout(_saveTimer)
+    _saveTimer = null
+  }
+
+  try {
+    writeRegistry()
+  } catch (error) {
+    console.warn(`[gateway] Failed to flush registry to ${REGISTRY_PATH}`, error)
+  }
+}
 
 function upsertAgent(agentId, publicKey, opts = {}) {
-  const now = Date.now();
-  const existing = registry.get(agentId);
+  const now = Date.now()
+  const existing = registry.get(agentId)
   // For gossipped agents, preserve the original lastSeen from the sender
   // Only use Date.now() for direct contacts (no lastSeen provided)
   const lastSeen = opts.lastSeen
     ? Math.max(existing?.lastSeen ?? 0, opts.lastSeen)
-    : now;
+    : now
   registry.set(agentId, {
     agentId,
     publicKey: publicKey || existing?.publicKey || "",
@@ -80,20 +162,20 @@ function upsertAgent(agentId, publicKey, opts = {}) {
     endpoints: opts.endpoints ?? existing?.endpoints ?? [],
     capabilities: opts.capabilities ?? existing?.capabilities ?? [],
     lastSeen,
-  });
+  })
   if (registry.size > MAX_AGENTS) {
-    const oldest = [...registry.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0];
-    registry.delete(oldest.agentId);
+    const oldest = [...registry.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0]
+    registry.delete(oldest.agentId)
   }
 }
 
 function pruneStaleAgents(ttl = STALE_TTL_MS) {
-  const cutoff = Date.now() - ttl;
-  let pruned = 0;
+  const cutoff = Date.now() - ttl
+  let pruned = 0
   for (const [id, p] of registry) {
-    if (p.lastSeen < cutoff) { registry.delete(id); pruned++; }
+    if (p.lastSeen < cutoff) { registry.delete(id); pruned++ }
   }
-  if (pruned > 0) console.log(`[gateway] Pruned ${pruned} stale agent(s) (TTL ${Math.round(ttl / 60000)}min)`);
+  if (pruned > 0) console.log(`[gateway] Pruned ${pruned} stale agent(s) (TTL ${Math.round(ttl / 60000)}min)`)
 }
 
 function getAgentsForExchange(limit = 50) {
@@ -102,7 +184,7 @@ function getAgentsForExchange(limit = 50) {
     .slice(0, limit)
     .map(({ agentId, publicKey, alias, endpoints, capabilities, lastSeen }) => ({
       agentId, publicKey, alias, endpoints: endpoints ?? [], capabilities: capabilities ?? [], lastSeen,
-    }));
+    }))
 }
 
 function findByCapability(cap) {
@@ -273,7 +355,7 @@ app.get("/health", async () => ({
 }));
 
 // Agent Card — served as canonical JSON so bytes on wire match the JWS signature
-let _cachedCardJson = null;
+let _cachedCardJson = null
 app.get("/.well-known/agent.json", async (_req, reply) => {
   if (!_cachedCardJson) {
     const cardUrl = PUBLIC_URL
@@ -394,9 +476,10 @@ app.get("/ws", { websocket: true }, (socket, req) => {
 // Startup
 // ---------------------------------------------------------------------------
 
-await startPeerListener();
-await app.listen({ port: HTTP_PORT, host: "::" });
-console.log(`[gateway] Public HTTP on [::]:${HTTP_PORT}`);
+loadRegistry()
+await startPeerListener()
+await app.listen({ port: HTTP_PORT, host: "::" })
+console.log(`[gateway] Public HTTP on [::]:${HTTP_PORT}`)
 
 // Prune stale agents every 5 minutes
-setInterval(() => pruneStaleAgents(), 5 * 60 * 1000);
+setInterval(() => pruneStaleAgents(), 5 * 60 * 1000)
