@@ -127,8 +127,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Ran `npm --prefix packages/agent-world-sdk run build` after the codec and regression-test changes; the SDK TypeScript build completed successfully and confirmed the updated compiled artifacts are available for downstream tests."
     },
     {
       "id": "T-010",

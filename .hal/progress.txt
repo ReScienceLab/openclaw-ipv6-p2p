@@ -324,3 +324,11 @@
   - For this deterministic fixture, keep the expected multibase output inline as `z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX` so future codec changes cannot silently shift the canonical string.
   - No `AGENTS.md` update was needed because the reusable fixture and compiled-artifact testing patterns were already documented in the root guide and Codebase Patterns section.
 ---
+## 2026-03-22 14:57:06 UTC - T-009
+- Ran `npm --prefix packages/agent-world-sdk run build` to validate the SDK package after the Base58 codec and regression updates; the TypeScript build completed successfully.
+- Files changed: `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - For this branch, the SDK-package verification story is satisfied by `npm --prefix packages/agent-world-sdk run build`; broader repo checks belong to the separate root build/test validation story.
+  - A build-only checkpoint in this area does not add new reusable module conventions, so updating `AGENTS.md` is unnecessary unless a future story uncovers a code-level pattern.
+  - Keeping the PRD `notes` field aligned with the exact command run makes later Hal recovery easier when the code changes were already in place before bookkeeping caught up.
+---
