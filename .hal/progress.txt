@@ -1,6 +1,8 @@
 # Ralph Progress Log
 
 ## Codebase Patterns
+- In `packages/agent-world-sdk/src/peer-protocol.ts`, `/peer/key-rotation` validation is authoritative inside `registerPeerRoutes()`, and new key-binding checks should run after multibase decoding but before `peerDb.upsert(...)`.
+- Reuse `agentIdFromPublicKey()` from `packages/agent-world-sdk/src/crypto.ts` for any public-key-to-agent binding check; do not duplicate the derivation logic in route handlers or tests.
 - In `gateway/server.mjs`, keep peer-protocol response payloads backward compatible even when internal registry helpers are renamed; `/peer/peers` and `/peer/announce` still emit `peers`.
 - Gateway registry persistence lives in `gateway/server.mjs` as a self-contained `$DATA_DIR/registry.json` helper: load on startup, filter out entries older than `STALE_TTL_MS`, and write atomically through `registry.json.tmp` + rename.
 - In `gateway/server.mjs`, registry persistence side effects should stay explicit: announce-driven `upsertAgent()` calls opt into debounced saves, while prune/shutdown paths use `flushRegistry()` for immediate durability.
@@ -146,4 +148,13 @@
   - The repo validation command order in `AGENTS.md` is accurate and sufficient for this area: build the root package first, then the SDK package, then run the Node test suite.
   - `T-009` did not require an `AGENTS.md` update because it validated existing patterns rather than introducing a new reusable convention.
   - A clean `git status` before the bookkeeping update is a useful check here because this final story should only add Hal tracking changes after the code and tests are already settled.
+---
+## 2026-03-22 14:13:56 UTC - T-001
+- Documented the authoritative `/peer/key-rotation` handler in `packages/agent-world-sdk/src/peer-protocol.ts` and recorded the exact pre-mutation insertion point for the upcoming `newAgentId`/`newPublicKey` binding check.
+- Captured the reusable derivation guidance in `AGENTS.md` and the consolidated pattern list so the next stories can reuse `agentIdFromPublicKey()` from the SDK crypto layer.
+- Files changed: `AGENTS.md`, `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - The authoritative SDK route is `registerPeerRoutes()` in `packages/agent-world-sdk/src/peer-protocol.ts`; that is where key-rotation validation must be tightened rather than in the plugin-level `src/peer-server.ts`.
+  - The safe insertion point for the new binding check is immediately after multibase decoding and the existing old-key `agentIdFromPublicKey(oldPublicKeyB64)` validation, before signature verification can flow into `peerDb.upsert(agentId, newPublicKeyB64, {})`.
+  - `agentIdFromPublicKey()` in `packages/agent-world-sdk/src/crypto.ts` is already the source-of-truth derivation helper used by the SDK route, so future stories should reuse it for the new-key binding check.
 ---

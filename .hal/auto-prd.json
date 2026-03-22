@@ -1,133 +1,142 @@
 {
-  "project": "Restrict World State Broadcasts",
-  "branchName": "compound/restrict-world-state-broadcasts",
-  "description": "Restrict world-state broadcast recipients to active world members derived from membership state, use each member's own endpoints for delivery, and add regression coverage for both exclusion and inclusion paths.",
+  "project": "Validate Key Rotation Agent Binding",
+  "branchName": "compound/validate-key-rotation-agent-binding",
+  "description": "Enforce server-side validation that /peer/key-rotation rejects requests where newAgentId does not match the agent ID derived from newPublicKey, preserve valid rotation behavior, add regression coverage, and verify the SDK and repo test suite still pass.",
   "userStories": [
     {
       "id": "T-001",
-      "title": "Inspect current world-state broadcast targeting",
-      "description": "As a developer, I need the existing broadcastWorldState recipient-selection flow documented so that the privacy fix can replace the unsafe path without broad refactoring.",
+      "title": "Locate the authoritative key rotation validation path",
+      "description": "As a developer, I need to identify the exact /peer/key-rotation handler and any helper functions it uses so that the binding fix is implemented in the authoritative validation path.",
       "acceptanceCriteria": [
-        "The implementation notes identify the current recipient-selection logic in packages/agent-world-sdk/src/world-server.ts.",
-        "The notes confirm whether broadcastWorldState currently iterates over peerDb.values() for recipient targeting.",
-        "The notes identify agentLastSeen and agentEndpoints as the membership structures available for recipient derivation.",
+        "The SDK source file and function handling /peer/key-rotation are identified",
+        "The code location where newAgentId and newPublicKey can be validated before state mutation is documented in the task output or implementation notes",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Inspection completed in packages/agent-world-sdk/src/world-server.ts. broadcastWorldState() currently builds knownPeers from [...peerDb.values()].filter((p) => p.endpoints?.length) and then iterates those peer records for delivery. The world server already tracks active membership separately via agentLastSeen (Map<string, number>) and agentEndpoints (Map<string, { alias: string; endpoints: Endpoint[] }>), and getMembers() already treats membership as the intersection of those two structures."
+      "notes": "The authoritative SDK route is `registerPeerRoutes()` in `packages/agent-world-sdk/src/peer-protocol.ts`, specifically the `fastify.post(\"/peer/key-rotation\", ...)` handler. It already decodes `oldIdentity.publicKeyMultibase` and `newIdentity.publicKeyMultibase` to `oldPublicKeyB64` and `newPublicKeyB64`, then validates the old binding with `agentIdFromPublicKey(oldPublicKeyB64) !== agentId`. The correct insertion point for the upcoming new-key binding check is in that same handler immediately after multibase decoding and before any path can reach `peerDb.upsert(agentId, newPublicKeyB64, {})`."
     },
     {
       "id": "T-002",
-      "title": "Add membership-based recipient selection",
-      "description": "As a developer, I need broadcast recipient IDs derived from active membership state so that only joined agents are eligible for world-state delivery.",
+      "title": "Identify and reuse the agent ID derivation helper",
+      "description": "As a developer, I need to confirm the existing helper that derives an agent ID from a public key so that the fix reuses the source-of-truth identity binding logic instead of duplicating it.",
       "acceptanceCriteria": [
-        "broadcastWorldState no longer uses peerDb.values() to determine recipient agent IDs.",
-        "Recipient selection is derived from agentLastSeen entries for the world.",
-        "Only agent IDs with at least one endpoint entry in agentEndpoints are returned as eligible recipients.",
+        "The existing helper used to derive an agent ID from a public key is identified in the SDK or shared identity code",
+        "The planned validation path references the existing helper instead of introducing duplicate derivation logic",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Added getBroadcastRecipientIds() in packages/agent-world-sdk/src/world-server.ts so broadcastWorldState() now derives recipient agent IDs from agentLastSeen and only keeps IDs that still have at least one endpoint entry in agentEndpoints. The broadcast path no longer iterates peerDb.values() to choose recipients."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "T-003",
-      "title": "Isolate eligible member endpoints for broadcast",
-      "description": "As a developer, I need a per-member endpoint lookup in the broadcast path so that each selected member is paired only with its own registered endpoints.",
+      "title": "Add derived new-agent validation in the rotation handler",
+      "description": "As a developer, I need the /peer/key-rotation handler to derive the expected agent ID from newPublicKey and compare it to newAgentId so that mismatched rotated identities are rejected.",
       "acceptanceCriteria": [
-        "The broadcast logic resolves endpoints from agentEndpoints for the currently selected member ID.",
-        "Members without endpoints are skipped without attempting delivery.",
-        "The code no longer reuses endpoint lists from unrelated peer records when preparing world-state sends.",
+        "The handler derives an expected agent ID from newPublicKey using the existing helper",
+        "The handler compares the derived agent ID to newAgentId before accepting the rotation",
+        "Requests with matching newAgentId and newPublicKey continue into the existing success path",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Updated packages/agent-world-sdk/src/world-server.ts so broadcastWorldState() resolves endpoints from agentEndpoints for each eligible recipient ID. Members without registered endpoints are skipped, and the loop no longer reuses peerDb endpoint lists that may belong to unrelated discovered peers."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "T-004",
-      "title": "Route sends through the existing delivery path",
-      "description": "As a joined agent, I need world-state snapshots delivered through the existing send mechanism so that the privacy fix preserves successful delivery behavior for valid members.",
+      "title": "Return a stable 400 error for mismatched rotated identities",
+      "description": "As a client developer, I need invalid rotation requests to fail with a consistent HTTP 400 response so that a mismatched new identity binding is easy to detect and diagnose.",
       "acceptanceCriteria": [
-        "The inner broadcast loop still calls the existing world-state send path for each eligible endpoint.",
-        "A member with multiple registered endpoints triggers one send attempt per owned endpoint.",
-        "No new delivery mechanism bypasses the current broadcast send implementation.",
+        "A request where derived(newPublicKey) does not equal newAgentId returns HTTP 400",
+        "The response body includes the exact message \"newAgentId does not match newPublicKey\"",
+        "The mismatch response is produced by the server-side validation path rather than by a downstream failure",
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Kept broadcast delivery on the existing signed HTTP `/peer/message` path in packages/agent-world-sdk/src/world-server.ts, but changed the per-member loop to attempt every owned endpoint instead of returning after the first successful send. Added test/world-state-broadcast.test.mjs to verify an active member with two registered endpoints receives a world.state send attempt on both."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "T-005",
-      "title": "Add a non-member broadcast exclusion test fixture",
-      "description": "As a developer, I need a focused test setup that models a known peer without active world membership so that the privacy leak can be verified in isolation.",
+      "title": "Guard state mutation behind the new binding validation",
+      "description": "As a maintainer, I need the new binding check to run before any key rotation persistence or membership updates so that rejected requests cannot mutate server state.",
       "acceptanceCriteria": [
-        "A test fixture or setup in test/*.test.mjs represents a peer known to discovery but absent from the world's active membership state.",
-        "The fixture includes peer data that would have been reachable under the pre-fix peerDb-based selection path.",
-        "The test setup builds from dist output following the repository's test conventions.",
+        "The newAgentId/newPublicKey validation executes before any rotation state mutation or persistence",
+        "A mismatched rotation request does not update stored keys, rotation records, or membership state",
+        "Existing success-path state updates still occur for valid rotation requests",
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "Added a reusable non-member fixture helper in test/world-state-broadcast.test.mjs that seeds discovery through a signed /peer/announce without calling world.join. The fixture asserts the announced peer lands in the peer list with a reachable endpoint, matching the shape that the old peerDb-based broadcast selection would have used."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "T-006",
-      "title": "Verify non-members do not receive world-state broadcasts",
-      "description": "As a developer, I need regression coverage for denied delivery so that peers without active membership cannot silently receive world snapshots again.",
+      "title": "Add a regression test for mismatched new key binding",
+      "description": "As a developer, I need a focused regression test that submits a malformed rotation request so that future changes cannot reintroduce acceptance of mismatched rotated identities.",
       "acceptanceCriteria": [
-        "A test asserts that a known peer without an agentLastSeen membership entry does not receive a world-state broadcast.",
-        "The test verifies that no send attempt is made to endpoints owned only by the non-member peer.",
-        "The test fails against the pre-fix peerDb-based recipient selection and passes with the membership-based implementation.",
+        "A new or updated SDK test submits a /peer/key-rotation request where newAgentId does not match the ID derived from newPublicKey",
+        "The test asserts that the response status is 400",
+        "The test asserts that the response body includes \"newAgentId does not match newPublicKey\"",
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "Extended test/world-state-broadcast.test.mjs with a regression that announces a reachable peer without sending world.join, waits across several broadcast intervals, and asserts no /peer/message send attempt is made to that non-member endpoint. The test fails under the old peerDb recipient-selection path and passes with membership-based targeting."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "T-007",
-      "title": "Verify active members still receive broadcasts on their own endpoints",
-      "description": "As a developer, I need regression coverage for allowed delivery so that active joined members continue receiving world-state updates after the privacy fix.",
+      "title": "Confirm valid key rotation behavior still succeeds",
+      "description": "As a developer, I need to verify that correctly bound rotation requests still complete successfully so that the security fix does not break legitimate key rotation.",
       "acceptanceCriteria": [
-        "A test asserts that an agent present in agentLastSeen with at least one endpoint in agentEndpoints receives a world-state broadcast.",
-        "The test verifies delivery uses the joined member's own endpoint data rather than another peer's endpoints.",
-        "The test covers a member with multiple endpoints or explicitly verifies iteration over all registered endpoints.",
+        "Existing valid key rotation test coverage still passes or is updated only for validation ordering",
+        "A correctly bound newAgentId and newPublicKey continues to produce a successful rotation response",
+        "No valid rotation test weakens its assertions to accommodate the fix",
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Strengthened test/world-state-broadcast.test.mjs so the positive regression seeds a discovered non-member alongside a joined member, intercepts outbound /peer/message sends, and asserts that world.state delivery hits exactly the active member's registered ports. The test still covers multi-endpoint delivery and now also proves endpoint ownership by excluding the non-member endpoint from the observed hit set."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "T-008",
-      "title": "Align existing broadcast coverage with membership-only behavior",
-      "description": "As a developer, I need existing broadcast tests reviewed and updated only where necessary so that the new membership requirement is enforced without weakening coverage.",
+      "title": "Build the SDK package after the handler and test changes",
+      "description": "As a maintainer, I need the agent-world SDK package to build cleanly after the change so that the fix remains compatible with the TypeScript project configuration.",
       "acceptanceCriteria": [
-        "Existing world-state broadcast tests continue to run with assertions intact unless an assertion conflicts with the new membership-only rule.",
-        "Any updated expectation explicitly reflects that only active joined members are valid broadcast recipients.",
-        "No existing assertion is removed solely to make the new implementation pass.",
+        "Running npm --prefix packages/agent-world-sdk run build completes successfully",
+        "No new TypeScript build errors are introduced by the handler or test changes",
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "Reviewed the existing world-state coverage and tightened test/world-members.test.mjs so a discovered peer announced through /peer/announce but never joined via world.join is explicitly excluded from subsequent join response membership data. Existing assertions stayed intact; the update adds a membership-only expectation without removing prior coverage."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "T-009",
-      "title": "Run build and full test validation",
-      "description": "As a developer, I need project validation completed after the code and regression updates so that the change is ready for review and autonomous execution.",
+      "title": "Run repository tests covering key rotation behavior",
+      "description": "As a maintainer, I need the repository test suite to pass after the fix so that the new validation is verified against current integration expectations.",
       "acceptanceCriteria": [
-        "npm run build succeeds after the recipient-selection and test changes.",
-        "node --test test/*.test.mjs succeeds after building.",
-        "The final diff includes the membership-based broadcast targeting change and regression coverage for both denied and allowed delivery paths.",
+        "Running node --test test/*.test.mjs completes successfully",
+        "Existing key rotation-related tests continue to pass alongside the new regression coverage",
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "Ran the required full validation sequence from the repo root on 2026-03-22: `npm run build`, `npm --prefix packages/agent-world-sdk run build`, and `node --test test/*.test.mjs`. Both builds succeeded, and the test suite finished with 157 passing tests and 0 failures. The diff under this branch includes the membership-based broadcast recipient selection in `packages/agent-world-sdk/src/world-server.ts` plus regression coverage in `test/world-state-broadcast.test.mjs` and `test/world-members.test.mjs`."
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-010",
+      "title": "Review final scope for a minimal security fix",
+      "description": "As a maintainer, I need to confirm the delivered change remains limited to binding validation, stable error handling, and regression coverage so that unrelated protocol behavior is not modified.",
+      "acceptanceCriteria": [
+        "The final change set is limited to key rotation validation, error handling, and regression coverage for newAgentId/newPublicKey binding",
+        "No unrelated transport, discovery, membership, or broadcast behavior is modified",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
     }
   ]
 }

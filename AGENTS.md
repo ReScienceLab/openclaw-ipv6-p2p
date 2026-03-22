@@ -87,6 +87,10 @@ All runtime config is in `openclaw.json` under `plugins.entries.awn.config`:
 - World membership / registry writes are debounced (1s); manual ops and TOFU writes are immediate
 - `flushDb()` called on service shutdown
 
+### SDK Key Rotation
+- In `packages/agent-world-sdk/src/peer-protocol.ts`, the authoritative `/peer/key-rotation` validation lives inside `registerPeerRoutes()`; add binding checks there before the `peerDb.upsert(agentId, newPublicKeyB64, {})` state mutation.
+- Reuse `agentIdFromPublicKey()` from `packages/agent-world-sdk/src/crypto.ts` for key-to-agent binding checks instead of duplicating derivation logic in tests or route handlers.
+
 ### World Server Membership
 - In `packages/agent-world-sdk/src/world-server.ts`, joined-world membership is tracked by `agentLastSeen` and `agentEndpoints`; `getMembers()` already treats active members as the intersection of those maps.
 - `peerDb` is broader discovery state and may include known peers outside the active world membership, so broadcast recipient selection should not use `peerDb` as the source of truth for world-state delivery.
