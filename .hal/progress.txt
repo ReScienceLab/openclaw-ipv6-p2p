@@ -231,3 +231,12 @@
   - This story did not require an `AGENTS.md` update because it validated an already-documented workflow instead of adding a new reusable codebase convention.
   - The only remaining unchecked PRD story is the final minimal-scope review, so the next iteration can focus on change-scope verification rather than additional implementation.
 ---
+## 2026-03-22 14:31:18 UTC - T-010
+- Reviewed the full branch diff against `main` and confirmed the implementation stayed limited to `/peer/key-rotation` binding validation, the stable mismatch error contract, focused regression coverage, and the matching AGENTS/Hal documentation for that area.
+- Re-ran the repo validation sequence: `npm run build`, `npm --prefix packages/agent-world-sdk run build`, and `node --test test/*.test.mjs`, which completed with 161 passing tests and 0 failures.
+- Files changed: `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - For final scope review stories, `git diff --name-only main...HEAD` plus the targeted patch review is enough to confirm whether unrelated transport, discovery, membership, or broadcast behavior slipped into the branch.
+  - In this branch, the non-bookkeeping diff remains confined to `packages/agent-world-sdk/src/peer-protocol.ts`, `src/peer-server.ts`, and the key-rotation regression tests, which is the expected minimal surface for this security fix.
+  - No `AGENTS.md` update was needed in this iteration because the reusable key-rotation guidance was already captured earlier in the root guide.
+---
