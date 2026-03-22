@@ -28,6 +28,15 @@
 (Add reusable patterns discovered during implementation here)
 
 ---
+## 2026-03-22 15:11:20 UTC - T-004
+- Extended `test/world-state-broadcast.test.mjs` so the intercepted `world.state` broadcasts now verify with `DOMAIN_SEPARATORS.MESSAGE` and fail under `DOMAIN_SEPARATORS.WORLD_STATE`, covering the real `broadcastWorldState()` output without changing recipient assertions.
+- Verified the story with `npm run build`, `npm --prefix packages/agent-world-sdk run build`, and `node --test test/*.test.mjs`; the full suite passed with 178 tests and 0 failures.
+- Files changed: `test/world-state-broadcast.test.mjs`, `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - The narrowest regression for `broadcastWorldState()` is to intercept outbound `/peer/message` calls in `test/world-state-broadcast.test.mjs` and verify the emitted payload directly, rather than inferring the signing domain from lower-level crypto helpers.
+  - For this branch, signature-domain checks can stay inside the existing broadcast delivery test as long as they only inspect the captured `world.state` payload and do not broaden recipient-selection coverage.
+  - No `AGENTS.md` update was needed in this iteration because the reusable world-state signing rule and broadcast-test setup pattern were already documented.
+---
 
 ## 2026-03-21 16:51:53 UTC - US-001
 - Renamed the gateway's internal peer-tracking symbols to registry/agent terminology in `gateway/server.mjs` without changing endpoint behavior outside the `/health` field rename.

@@ -11,6 +11,7 @@ const {
   signWithDomainSeparator,
   DOMAIN_SEPARATORS,
   agentIdFromPublicKey,
+  verifyWithDomainSeparator,
 } = await import("../packages/agent-world-sdk/dist/crypto.js")
 
 const PORT = 18210
@@ -233,6 +234,26 @@ describe("World state broadcast delivery", () => {
       const content = JSON.parse(hit.body.content)
       assert.equal(content.worldId, "broadcast-test")
       assert.equal(content.tick, 1)
+
+      const { signature, ...unsignedPayload } = hit.body
+      assert.equal(
+        verifyWithDomainSeparator(
+          DOMAIN_SEPARATORS.MESSAGE,
+          hit.body.publicKey,
+          unsignedPayload,
+          signature
+        ),
+        true
+      )
+      assert.equal(
+        verifyWithDomainSeparator(
+          DOMAIN_SEPARATORS.WORLD_STATE,
+          hit.body.publicKey,
+          unsignedPayload,
+          signature
+        ),
+        false
+      )
     }
   })
 })

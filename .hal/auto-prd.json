@@ -56,8 +56,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Extended `test/world-state-broadcast.test.mjs` to validate the actual intercepted `world.state` messages emitted by `broadcastWorldState()`. The regression now verifies each broadcast signature against `DOMAIN_SEPARATORS.MESSAGE` and confirms the same payload does not verify under `DOMAIN_SEPARATORS.WORLD_STATE`, keeping the coverage focused on signing-domain behavior without reworking recipient-selection assertions."
     },
     {
       "id": "T-005",
