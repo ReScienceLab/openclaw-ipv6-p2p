@@ -141,8 +141,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Ran `node --test test/*.test.mjs` on `compound/fix-sdk-protocol-consistency-bugs` after the scoped SDK consistency fixes and regression updates. The full repository suite passed with 181 tests, 30 suites, and 0 failures, confirming the final change set remains limited to the three targeted protocol fixes plus their minimal regression coverage."
     }
   ]
 }

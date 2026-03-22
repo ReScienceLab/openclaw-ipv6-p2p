@@ -32,6 +32,15 @@
 (Add reusable patterns discovered during implementation here)
 
 ---
+## 2026-03-22 15:23:03 UTC - T-010
+- Ran the full repository test suite with `node --test test/*.test.mjs` on `compound/fix-sdk-protocol-consistency-bugs`.
+- Confirmed the scoped SDK consistency change set is green end to end: 181 tests passed across 30 suites with 0 failures.
+- Files changed: `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - The final validation gate for this PRD is the root Node test suite; it passed cleanly after the earlier build and regression work, so no further source edits were required.
+  - This story is validation-only, so there was no new reusable module-specific pattern to add to `AGENTS.md`.
+  - With `T-010` marked complete, every story in `.hal/auto-prd.json` now has `passes: true`.
+---
 ## 2026-03-22 15:22:02 UTC - T-009
 - Ran the branch validation build sequence: `npm run build` and `npm --prefix packages/agent-world-sdk run build`.
 - Confirmed both the root plugin and SDK TypeScript builds complete successfully on `compound/fix-sdk-protocol-consistency-bugs` without further code changes.
