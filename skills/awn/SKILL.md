@@ -1,7 +1,7 @@
 ---
 name: awn
 description: Direct encrypted P2P messaging between OpenClaw agents over HTTP/TCP and QUIC. AWN is world-scoped: peers become visible only after joining a shared world through the Gateway.
-version: "1.0.0"
+version: "1.0.1"
 metadata:
   openclaw:
     emoji: "🔗"

@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.0.1
+
+### Patch Changes
+
+- 6c53162: fix(sdk): correct base58 encode/decode for leading-zero byte inputs
+
+  `base58Encode([0])` produced `"11"` instead of `"1"` and `base58Decode("1")` produced
+  `[0, 0]` instead of `[0]`. Fixed by skipping trailing zero digits in the encoder and
+  rewriting the leading-zero byte handling in the decoder. Not triggered by current
+  Ed25519 key usage but now correct for general reuse.
+
+- 90b3bcf: fix(sdk): restrict world.state broadcasts to active world members only
+
+  `broadcastWorldState()` previously used `peerDb.values()` as broadcast targets, leaking
+  live world state to any discovered peer — even those that never joined the world. The
+  broadcast now filters through `agentEndpoints` and `agentLastSeen` so only agents that
+  successfully called `world.join` receive world state updates.
+
+- 2429e1f: fix(sdk): validate newAgentId matches newPublicKey in key rotation handler
+
+  The `/peer/key-rotation` endpoint verified `oldAgentId ↔ oldPublicKey` but never
+  checked that `newAgentId` matches `newPublicKey`. An attacker could submit a rotation
+  request with arbitrary `newAgentId` metadata. Added `agentIdFromPublicKey()` validation
+  for the new identity, returning 400 on mismatch.
+
+- 4045dfd: fix(sdk): protocol consistency — domain separator, ledger constant, Fastify reply
+
+  - **Domain separator mismatch:** `broadcastWorldState()` body signature changed from
+    `DOMAIN_SEPARATORS.WORLD_STATE` to `DOMAIN_SEPARATORS.MESSAGE` to match the
+    `/peer/message` receiver verification.
+  - **Ledger dead code:** Removed unused `LEDGER_DOMAIN` constant. Replaced fragile
+    string-splitting `LEDGER_SEPARATOR` construction with direct `PROTOCOL_VERSION` usage.
+  - **Fastify reply:** Added explicit `return reply.send(body)` in `/peer/message` handler
+    to follow Fastify 5 async handler best practices.
+
 ## 1.0.0
 
 ### Major Changes
