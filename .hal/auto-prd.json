@@ -127,8 +127,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Ran the required build validation sequence for this branch: `npm run build` and `npm --prefix packages/agent-world-sdk run build`. Both TypeScript builds completed successfully without requiring source changes beyond the already-scoped protocol consistency fixes and targeted regressions."
     },
     {
       "id": "T-010",

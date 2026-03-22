@@ -32,6 +32,15 @@
 (Add reusable patterns discovered during implementation here)
 
 ---
+## 2026-03-22 15:22:02 UTC - T-009
+- Ran the branch validation build sequence: `npm run build` and `npm --prefix packages/agent-world-sdk run build`.
+- Confirmed both the root plugin and SDK TypeScript builds complete successfully on `compound/fix-sdk-protocol-consistency-bugs` without further code changes.
+- Files changed: `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - The documented build order is correct for this repo: root package first, SDK package second.
+  - This story is a pure validation gate, so no `AGENTS.md` update is needed unless the build workflow itself changes.
+  - With `T-009` complete, the only remaining unfinished story in this PRD is the final repository test-suite run in `T-010`.
+---
 ## 2026-03-22 15:20:29 UTC - T-008
 - Added focused direct-SDK regressions for the callback-based `/peer/message` route in `test/key-rotation-sdk.test.mjs`, covering both a successful custom reply body and a custom `422` error reply.
 - Reused `registerPeerRoutes()` with `fastify.inject()` and a body-signed message-domain payload so the tests hit the callback branch without starting a listener.
