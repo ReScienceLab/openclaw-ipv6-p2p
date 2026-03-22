@@ -85,8 +85,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added `test/world-ledger-separator.test.mjs` as a narrow root `node:test` regression that reads the built `packages/agent-world-sdk/dist/world-ledger.js` artifact to assert the exact `LEDGER_SEPARATOR` declaration and validates a real ledger entry signature against ``AgentWorld-Ledger-${PROTOCOL_VERSION}\\0``. Verified with `npm --prefix packages/agent-world-sdk run build`, `npm run build`, and `node --test test/*.test.mjs`."
     },
     {
       "id": "T-007",

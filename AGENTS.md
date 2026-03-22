@@ -99,6 +99,7 @@ All runtime config is in `openclaw.json` under `plugins.entries.awn.config`:
 
 ### SDK World Ledger
 - In `packages/agent-world-sdk/src/world-ledger.ts`, keep `LEDGER_SEPARATOR` defined directly as ``AgentWorld-Ledger-${PROTOCOL_VERSION}\0`` by importing `PROTOCOL_VERSION` from `./version.js`; do not derive it indirectly from `DOMAIN_SEPARATORS.MESSAGE`.
+- For regressions around private SDK constants like `LEDGER_SEPARATOR`, prefer a root `node:test` file that reads the built `packages/agent-world-sdk/dist` artifact and pairs that with a narrow runtime signature check, rather than exporting the constant only for test access.
 
 ### World Server Membership
 - In `packages/agent-world-sdk/src/world-server.ts`, joined-world membership is tracked by `agentLastSeen` and `agentEndpoints`; `getMembers()` already treats active members as the intersection of those maps.

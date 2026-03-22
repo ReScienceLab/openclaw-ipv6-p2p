@@ -4,6 +4,7 @@
 - For the `compound/fix-sdk-protocol-consistency-bugs` branch, keep non-bookkeeping changes scoped to `packages/agent-world-sdk/src/world-server.ts`, `packages/agent-world-sdk/src/world-ledger.ts`, `packages/agent-world-sdk/src/peer-protocol.ts`, and only the minimal regression files needed to verify those three fixes.
 - In `packages/agent-world-sdk/src/world-server.ts`, `world.state` broadcasts still go through `/peer/message`, so their signatures must use `DOMAIN_SEPARATORS.MESSAGE` rather than `DOMAIN_SEPARATORS.WORLD_STATE`.
 - In `packages/agent-world-sdk/src/world-ledger.ts`, define `LEDGER_SEPARATOR` directly as ``AgentWorld-Ledger-${PROTOCOL_VERSION}\0`` from `./version.js` instead of deriving it from `DOMAIN_SEPARATORS.MESSAGE`.
+- For private SDK constants that are not exported, prefer a root `node:test` regression against the built `packages/agent-world-sdk/dist` artifact plus a narrow runtime verification instead of widening the public API only for tests.
 - For direct SDK handler regressions that the integrated HTTP suites do not hit, prefer a root `node:test` file that imports built `packages/agent-world-sdk/dist` entrypoints and exercises `registerPeerRoutes()` with `fastify.inject()` instead of starting a network listener.
 - For deterministic identity-helper regressions in this branch, use `nacl.sign.keyPair.fromSeed(Buffer.alloc(32, 1))`; its public key is `iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=` and it maps to stable literals for both `deriveDidKey()` and `toPublicKeyMultibase()`.
 - For Base58 zero-boundary fixes in this repo, both codec halves need explicit all-zero handling: the encoder must not append the synthetic zero digit after leading `1`s, and the decoder must not retain the synthetic accumulator byte for all-leading-`1` inputs.
@@ -29,6 +30,17 @@
 (Add reusable patterns discovered during implementation here)
 
 ---
+## 2026-03-22 15:43:04 UTC - T-006
+- Added `test/world-ledger-separator.test.mjs`, a focused root regression that reads `packages/agent-world-sdk/dist/world-ledger.js` to assert the exact `LEDGER_SEPARATOR` declaration and verifies a real ledger signature with ``AgentWorld-Ledger-${PROTOCOL_VERSION}\0``.
+- Preserved the private-constant testing pattern in `AGENTS.md` rather than exporting `LEDGER_SEPARATOR` just for test access.
+- Verified the story with `npm --prefix packages/agent-world-sdk run build`, `npm run build`, and `node --test test/*.test.mjs`; the full suite passed with 179 tests and 0 failures.
+- Files changed: `test/world-ledger-separator.test.mjs`, `AGENTS.md`, `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - The narrowest regression for a private SDK constant in this repo is a root `node:test` file that inspects the compiled `dist` artifact and then proves the resolved constant through one runtime behavior check.
+  - Keeping `LEDGER_SEPARATOR` private avoids widening the SDK surface for a test-only need, while still letting the regression pin the exact constant form.
+  - Full validation for this branch remains `npm run build && npm --prefix packages/agent-world-sdk run build && node --test test/*.test.mjs` because the root tests read both compiled trees.
+---
+
 ## 2026-03-22 15:11:20 UTC - T-004
 - Extended `test/world-state-broadcast.test.mjs` so the intercepted `world.state` broadcasts now verify with `DOMAIN_SEPARATORS.MESSAGE` and fail under `DOMAIN_SEPARATORS.WORLD_STATE`, covering the real `broadcastWorldState()` output without changing recipient assertions.
 - Verified the story with `npm run build`, `npm --prefix packages/agent-world-sdk run build`, and `node --test test/*.test.mjs`; the full suite passed with 178 tests and 0 failures.
