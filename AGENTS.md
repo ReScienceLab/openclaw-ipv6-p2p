@@ -60,6 +60,7 @@ Trust model (4-layer):
 - Tests use `node:test` + `node:assert/strict` (no external test framework)
 - Tests import from `dist/` — always `npm run build` first
 - World-state broadcast tests can model discovered non-members by sending a signed `/peer/announce` without `world.join`; this populates discovery state without creating active membership.
+- To prove broadcast endpoint ownership in `test/world-state-broadcast.test.mjs`, seed a discovered non-member alongside a joined member and assert intercepted `/peer/message` sends hit exactly the joined member's ports.
 
 ### Plugin Config
 All runtime config is in `openclaw.json` under `plugins.entries.awn.config`:

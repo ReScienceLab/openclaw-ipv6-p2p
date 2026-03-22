@@ -12,6 +12,7 @@
 - In `packages/agent-world-sdk/src/world-server.ts`, world-state broadcasts should attempt every endpoint registered on an active member, not stop after the first successful `/peer/message` delivery.
 - Full repo validation currently needs both TypeScript builds before `node --test test/*.test.mjs`: run `npm run build` and `npm --prefix packages/agent-world-sdk run build` so both `dist/` trees exist for the tests.
 - In `test/world-state-broadcast.test.mjs`, model a discovered-but-not-joined peer by sending a signed `/peer/announce` without `world.join`; that seeds the old `peerDb` shape while leaving `agentLastSeen` and `agentEndpoints` empty for exclusion coverage.
+- In `test/world-state-broadcast.test.mjs`, prove endpoint ownership by seeding both a discovered non-member and a joined member, intercepting outbound `/peer/message` calls, and asserting the exact hit-port set matches only the joined member's endpoints.
 
 (Add reusable patterns discovered during implementation here)
 
@@ -117,4 +118,13 @@
   - The clearest way to prove a broadcast exclusion in this suite is to intercept `fetch`, seed the peer through `/peer/announce`, wait longer than one broadcast interval, and assert zero `/peer/message` hits for the non-member endpoint.
   - Restoring `globalThis.fetch` after each broadcast test keeps negative and positive delivery assertions isolated while still sharing one world server fixture.
   - Full validation for this branch remains `npm run build && npm --prefix packages/agent-world-sdk run build && node --test test/*.test.mjs`.
+---
+## 2026-03-22 13:59:39 UTC - T-007
+- Strengthened the positive regression in `test/world-state-broadcast.test.mjs` so it now seeds a discovered non-member alongside a joined member and asserts `world.state` delivery hits exactly the active member's registered endpoints.
+- Updated the root agent guide with the endpoint-ownership broadcast test pattern and marked T-007 passing in `.hal/auto-prd.json`.
+- Files changed: `test/world-state-broadcast.test.mjs`, `AGENTS.md`, `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - The positive broadcast regression should share the non-member fixture with the joined-member case so the test proves both inclusion and endpoint ownership in one setup.
+  - For these outbound delivery tests, asserting the sorted set of intercepted destination ports is more robust than relying on hit order across concurrent fetches.
+  - Full validation for this branch still requires both builds before `node --test test/*.test.mjs`.
 ---

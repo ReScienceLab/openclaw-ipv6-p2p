@@ -187,9 +187,9 @@ describe("World state broadcast delivery", () => {
     assert.equal(hits.length, 0)
   })
 
-  it("broadcasts world.state to each registered endpoint for an active member", async () => {
+  it("broadcasts world.state only to the active member's registered endpoints", async () => {
     const hits = []
-    const endpointPorts = new Set([29001, 29002])
+    const endpointPorts = new Set([29001, 29002, 29003])
 
     globalThis.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
@@ -208,6 +208,8 @@ describe("World state broadcast delivery", () => {
       return originalFetch(input, init)
     }
 
+    const nonMember = await createKnownNonMemberFixture()
+
     const kp = makeKeypair()
     const agentId = agentIdFromPublicKey(kp.publicKey)
     const full = nacl.sign.keyPair.fromSeed(kp.secretKey.slice(0, 32))
@@ -221,16 +223,16 @@ describe("World state broadcast delivery", () => {
 
     await waitFor(() => hits.length >= 2)
 
-    assert.equal(hits[0].body.event, "world.state")
-    assert.equal(hits[1].body.event, "world.state")
-    assert.equal(new URL(hits[0].url).port, "29001")
-    assert.equal(new URL(hits[1].url).port, "29002")
+    const worldStateHits = hits.filter((hit) => hit.body.event === "world.state")
+    const hitPorts = worldStateHits.map((hit) => new URL(hit.url).port).sort()
 
-    const contentA = JSON.parse(hits[0].body.content)
-    const contentB = JSON.parse(hits[1].body.content)
-    assert.equal(contentA.worldId, "broadcast-test")
-    assert.equal(contentB.worldId, "broadcast-test")
-    assert.equal(contentA.tick, 1)
-    assert.equal(contentB.tick, 1)
+    assert.deepEqual(hitPorts, ["29001", "29002"])
+    assert.equal(hitPorts.includes(String(nonMember.endpoints[0].port)), false)
+
+    for (const hit of worldStateHits) {
+      const content = JSON.parse(hit.body.content)
+      assert.equal(content.worldId, "broadcast-test")
+      assert.equal(content.tick, 1)
+    }
   })
 })

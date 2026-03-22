@@ -98,8 +98,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Strengthened test/world-state-broadcast.test.mjs so the positive regression seeds a discovered non-member alongside a joined member, intercepts outbound /peer/message sends, and asserts that world.state delivery hits exactly the active member's registered ports. The test still covers multi-endpoint delivery and now also proves endpoint ownership by excluding the non-member endpoint from the observed hit set."
     },
     {
       "id": "T-008",
