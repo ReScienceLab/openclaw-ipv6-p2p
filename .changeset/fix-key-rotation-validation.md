@@ -1,5 +1,5 @@
 ---
-"@resciencelab/agent-world-sdk": patch
+"@resciencelab/agent-world-network": patch
 ---
 
 fix(sdk): validate newAgentId matches newPublicKey in key rotation handler

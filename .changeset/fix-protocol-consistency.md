@@ -1,5 +1,5 @@
 ---
-"@resciencelab/agent-world-sdk": patch
+"@resciencelab/agent-world-network": patch
 ---
 
 fix(sdk): protocol consistency — domain separator, ledger constant, Fastify reply

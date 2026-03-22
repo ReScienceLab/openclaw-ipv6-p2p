@@ -1,5 +1,4 @@
 ---
-"@resciencelab/agent-world-sdk": patch
 "@resciencelab/agent-world-network": patch
 ---
 

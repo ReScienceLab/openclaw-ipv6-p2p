@@ -1,5 +1,5 @@
 ---
-"@resciencelab/agent-world-sdk": patch
+"@resciencelab/agent-world-network": patch
 ---
 
 fix(sdk): correct base58 encode/decode for leading-zero byte inputs
