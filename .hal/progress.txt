@@ -186,3 +186,12 @@
   - `test/key-rotation.test.mjs` imports the compiled root `dist/peer-server.js`, so build ordering matters when validating handler changes in this area.
   - The stable client-facing mismatch contract for this branch is HTTP 400 with the exact JSON body `{ "error": "newAgentId does not match newPublicKey" }`.
 ---
+## 2026-03-22 14:23:17 UTC - T-005
+- Added a key-rotation regression in `test/key-rotation.test.mjs` that seeds the original TOFU binding with a valid signed message, submits a mismatched `newAgentId` rotation request, and asserts the stored peer public key stays unchanged after the 400 response.
+- Verified the story with `npm run build`, `npm --prefix packages/agent-world-sdk run build`, and `node --test test/key-rotation.test.mjs`.
+- Files changed: `test/key-rotation.test.mjs`, `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - In `test/key-rotation.test.mjs`, the clearest way to prove `/peer/key-rotation` is non-mutating on failure is to seed TOFU state through `/peer/message`, then assert `getPeer(agentId).publicKey` is unchanged after the rejected rotation request.
+  - This story did not require an `AGENTS.md` update because the reusable route-location and error-contract guidance was already captured there.
+  - The targeted validation path for this area remains `npm run build`, `npm --prefix packages/agent-world-sdk run build`, then `node --test test/key-rotation.test.mjs`.
+---

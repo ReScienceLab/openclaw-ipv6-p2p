@@ -12,7 +12,7 @@ const pkgVersion = require("../package.json").version
 const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
 
 const { startPeerServer, stopPeerServer, addWorldMembers } = await import("../dist/peer-server.js")
-const { initDb } = await import("../dist/peer-db.js")
+const { initDb, getPeer } = await import("../dist/peer-db.js")
 const { agentIdFromPublicKey, signWithDomainSeparator, DOMAIN_SEPARATORS, signHttpRequest, canonicalize } = await import("../dist/identity.js")
 
 function makeKeypair() {
@@ -230,6 +230,74 @@ describe("key rotation endpoint", () => {
     assert.deepEqual(await resp.json(), {
       error: "newAgentId does not match newPublicKey",
     })
+  })
+
+  test("rejects mismatched rotated identity binding before mutating stored key state", async () => {
+    const oldKey = makeKeypair()
+    const attemptedNewKey = makeKeypair()
+    const otherNewKey = makeKeypair()
+    addWorldMembers("test-world", [oldKey.agentId])
+
+    const validSeedResp = await sendSignedMessage(port, oldKey, {
+      from: oldKey.agentId,
+      publicKey: oldKey.publicKey,
+      event: "ping",
+      content: "seed tofu binding",
+      timestamp: Date.now(),
+      signature: signWithDomainSeparator(
+        DOMAIN_SEPARATORS.MESSAGE,
+        {
+          from: oldKey.agentId,
+          publicKey: oldKey.publicKey,
+          event: "ping",
+          content: "seed tofu binding",
+          timestamp: Date.now(),
+        },
+        oldKey.secretKey
+      ),
+    })
+    assert.equal(validSeedResp.status, 200)
+    assert.equal(getPeer(oldKey.agentId)?.publicKey, oldKey.publicKey)
+
+    const signable = {
+      agentId: oldKey.agentId,
+      oldPublicKey: oldKey.publicKey,
+      newPublicKey: attemptedNewKey.publicKey,
+      timestamp: Date.now(),
+    }
+    const body = {
+      type: "agentworld-identity-rotation",
+      version: PROTOCOL_VERSION,
+      oldAgentId: oldKey.agentId,
+      newAgentId: otherNewKey.agentId,
+      oldIdentity: {
+        agentId: oldKey.agentId,
+        kid: "#identity",
+        publicKeyMultibase: pubToMultibase(oldKey.publicKey),
+      },
+      newIdentity: {
+        agentId: otherNewKey.agentId,
+        kid: "#identity",
+        publicKeyMultibase: pubToMultibase(attemptedNewKey.publicKey),
+      },
+      timestamp: signable.timestamp,
+      proofs: {
+        signedByOld: makeProof("#identity", oldKey.secretKey, signable),
+        signedByNew: makeProof("#identity", attemptedNewKey.secretKey, signable),
+      },
+    }
+
+    const resp = await fetch(`http://[::1]:${port}/peer/key-rotation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+
+    assert.equal(resp.status, 400)
+    assert.deepEqual(await resp.json(), {
+      error: "newAgentId does not match newPublicKey",
+    })
+    assert.equal(getPeer(oldKey.agentId)?.publicKey, oldKey.publicKey)
   })
 
   test("rejects wrong type/version", async () => {
