@@ -281,6 +281,12 @@ export function registerPeerRoutes(
         .code(400)
         .send({ error: "agentId does not match oldPublicKey" });
     }
+    const expectedNewAgentId = agentIdFromPublicKey(newPublicKeyB64);
+    if (expectedNewAgentId !== rot.newAgentId) {
+      return reply
+        .code(400)
+        .send({ error: "newAgentId does not match newPublicKey" });
+    }
 
     const MAX_AGE_MS = 5 * 60 * 1000;
     if (timestamp && Math.abs(Date.now() - timestamp) > MAX_AGE_MS) {
@@ -330,7 +336,7 @@ export function registerPeerRoutes(
 }
 
 /** Convert a multibase (z<base58btc>) Ed25519 public key to base64. */
-function multibaseToBase64(multibase: string): string {
+export function multibaseToBase64(multibase: string): string {
   if (!multibase.startsWith("z"))
     throw new Error("Unsupported multibase prefix");
   const bytes = base58Decode(multibase.slice(1));
@@ -340,7 +346,9 @@ function multibaseToBase64(multibase: string): string {
 
 const BASE58_ALPHABET =
   "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-function base58Decode(str: string): Uint8Array {
+export function base58Decode(str: string): Uint8Array {
+  if (str.length === 0) return new Uint8Array()
+
   const bytes = [0];
   for (const char of str) {
     let carry = BASE58_ALPHABET.indexOf(char);
@@ -355,9 +363,16 @@ function base58Decode(str: string): Uint8Array {
       carry >>= 8;
     }
   }
+
+  let leadingZeroCount = 0
   for (const char of str) {
-    if (char === "1") bytes.push(0);
-    else break;
+    if (char !== "1") break
+    leadingZeroCount++
   }
+
+  if (leadingZeroCount === str.length) return new Uint8Array(leadingZeroCount)
+
+  for (let i = 0; i < leadingZeroCount; i++) bytes.push(0)
+
   return new Uint8Array(bytes.reverse());
 }
