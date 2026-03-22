@@ -213,3 +213,12 @@
   - For SDK route success coverage, asserting `peerDb.get(oldAgentId)?.publicKey === newPublicKey` is the strongest proof that the accepted rotation reached the existing persistence path without weakening response assertions.
   - This story did not require an `AGENTS.md` update because the reusable key-rotation handler and validation-contract patterns were already documented.
 ---
+## 2026-03-22 14:28:31 UTC - T-008
+- Ran `npm --prefix packages/agent-world-sdk run build` to validate the SDK package after the key-rotation handler and regression test changes; the TypeScript build completed successfully.
+- Marked `T-008` passing in `.hal/auto-prd.json`.
+- Files changed: `.hal/auto-prd.json`, `.hal/progress.txt`
+- **Learnings for future iterations:**
+  - For key-rotation work isolated to the SDK package, `npm --prefix packages/agent-world-sdk run build` is the direct acceptance check for TypeScript compatibility before broader repo validation.
+  - This validation story did not require an `AGENTS.md` update because it confirmed an existing build pattern rather than introducing a new reusable module convention.
+  - The remaining unchecked stories still require broader repo-level verification and final scope review after this package build checkpoint.
+---
