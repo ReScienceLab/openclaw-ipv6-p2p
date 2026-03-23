@@ -857,4 +857,5 @@ export default function register(api: any) {
       return { content: [{ type: "text", text: `Joined world '${worldId}' — ${memberCount} other member(s) discovered` }] }
     },
   })
+
 }
