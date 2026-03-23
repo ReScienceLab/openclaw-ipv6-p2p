@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2
+
+### Patch Changes
+
+- d8c3085: Fix domain: agentsworlds.ai -> agentworlds.ai across all config and source files.
+- f28e2ff: Fix deploy-gateway: remove -f from Cloudflare curl to expose API errors, skip DNS update when IP is already correct (idempotent with Elastic IP), downgrade Cloudflare API failures to warnings so deploys are not blocked.
+
 ## 1.1.1
 
 ### Patch Changes
