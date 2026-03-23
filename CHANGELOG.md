@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3
+
+### Patch Changes
+
+- ed8440e: Merge peerServer into app: all /peer/\* routes now served on a single port (HTTP_PORT 8100) alongside /worlds and /health, fixing announce unreachability via GATEWAY_URL.
+
 ## 1.1.2
 
 ### Patch Changes
