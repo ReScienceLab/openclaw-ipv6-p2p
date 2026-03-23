@@ -1,5 +1,4 @@
 ---
-"@resciencelab/agent-world-sdk": minor
 "@resciencelab/agent-world-network": minor
 ---
 
