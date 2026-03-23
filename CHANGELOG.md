@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0
+
+### Minor Changes
+
+- 52a9605: feat: add gateway heartbeat endpoint, reduce stale TTL to 90s, add announce webhook & OpenAPI spec
+
+### Patch Changes
+
+- 1666ab7: fix: prevent release failure when SDK version already published
+
 ## 1.2.0
 
 ### Minor Changes
