@@ -17,17 +17,13 @@ const sdkPkg = JSON.parse(readFileSync('packages/agent-world-sdk/package.json', 
 sdkPkg.version = version
 writeFileSync('packages/agent-world-sdk/package.json', JSON.stringify(sdkPkg, null, 2) + '\n')
 
-const gatewayPkg = JSON.parse(readFileSync('gateway/package.json', 'utf8'))
-gatewayPkg.dependencies['@resciencelab/agent-world-sdk'] = `^${version}`
-writeFileSync('gateway/package.json', JSON.stringify(gatewayPkg, null, 2) + '\n')
-
 if (gatewayUrl) {
   let indexTs = readFileSync('src/index.ts', 'utf8')
   indexTs = indexTs.replace(/(process\.env\.GATEWAY_URL \?\? ")[^"]*"/, `$1${gatewayUrl}"`)
   writeFileSync('src/index.ts', indexTs)
 
   let clientJs = readFileSync('web/client.js', 'utf8')
-  clientJs = clientJs.replace(/(window\.GATEWAY_URL \|\| ")[^"]*"/, `$1${gatewayUrl}"`)
+  clientJs = clientJs.replace(/const GATEWAY = [^\n]*;/, `const GATEWAY = window.GATEWAY_URL || "${gatewayUrl}";`)
   writeFileSync('web/client.js', clientJs)
 
   let docsHtml = readFileSync('docs/index.html', 'utf8')
@@ -35,4 +31,4 @@ if (gatewayUrl) {
   writeFileSync('docs/index.html', docsHtml)
 }
 
-console.log(`Synced version ${version} → openclaw.plugin.json, skills/awn/SKILL.md, packages/agent-world-sdk/package.json, gateway/package.json${gatewayUrl ? `, src/index.ts, web/client.js, docs/index.html (gatewayUrl: ${gatewayUrl})` : ''}`)
+console.log(`Synced version ${version} → openclaw.plugin.json, skills/awn/SKILL.md, packages/agent-world-sdk/package.json${gatewayUrl ? `, src/index.ts, web/client.js, docs/index.html (gatewayUrl: ${gatewayUrl})` : ''}`)

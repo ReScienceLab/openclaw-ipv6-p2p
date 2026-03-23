@@ -53,10 +53,11 @@ openclaw join_world --address world.example.com:8099</code></pre>
   <script>
     const input = document.getElementById('gateway-url');
     const tbody = document.getElementById('worlds');
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const defaultGatewayUrl = window.GATEWAY_URL
-      || ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      || (isLocalhost
         ? 'http://localhost:8100'
-        : '');
+        : input.value);
 
     input.value = defaultGatewayUrl;
 
