@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - "gateway/**"
-      - "packages/agent-world-sdk/**"
+      - "packages/agent-world-sdk/src/**"
   workflow_dispatch:
 
 concurrency:

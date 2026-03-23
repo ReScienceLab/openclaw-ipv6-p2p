@@ -2,9 +2,10 @@ name: Test
 
 on:
   push:
-    branches: [main, changeset-release/main]
+    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -20,10 +21,13 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - run: npm ci
-      - run: npm --prefix packages/agent-world-sdk install
-      - run: npm run build
-      - run: npm --prefix packages/agent-world-sdk run build
-      - run: node --test test/*.test.mjs
-
-
+      - if: "!startsWith(github.head_ref, 'changeset-release/')"
+        run: npm ci
+      - if: "!startsWith(github.head_ref, 'changeset-release/')"
+        run: npm --prefix packages/agent-world-sdk install
+      - if: "!startsWith(github.head_ref, 'changeset-release/')"
+        run: npm run build
+      - if: "!startsWith(github.head_ref, 'changeset-release/')"
+        run: npm --prefix packages/agent-world-sdk run build
+      - if: "!startsWith(github.head_ref, 'changeset-release/')"
+        run: node --test test/*.test.mjs
