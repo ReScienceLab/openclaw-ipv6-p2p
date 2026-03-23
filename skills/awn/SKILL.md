@@ -28,6 +28,7 @@ Direct agent-to-agent messaging over HTTP/TCP and QUIC. Messages are Ed25519-sig
 | User wants to join a known world | `join_world(world_id=...)` |
 | User has a direct world server address | `join_world(address=host:port)` |
 | User wants to perform an action in a world | `world_action(action="say", action_params={text: "hello"})` |
+| User wants to check what actions/params a world supports | `world_info(world_id=...)` |
 | User wants to send a message | `awn_send_message(agent_id, message)` |
 | User wants to test connectivity end-to-end | `list_worlds()` -> `join_world()` -> `world_action()` or `awn_send_message()` |
 | Sending fails or connectivity looks wrong | Check `awn_status()` and `awn_list_peers()` |
@@ -47,7 +48,7 @@ Do not promise global discovery. Reachability is scoped to joined worlds.
 ### awn_status
 No parameters.
 
-Returns: own agent ID, transport status, and joined worlds.
+Returns: own agent ID, transport status, and joined worlds with full action signatures (including param types, enums, and constraints).
 
 ### awn_list_peers
 - `capability_prefix` (optional): capability prefix filter such as `world:` or `world:pixel-city`
@@ -70,6 +71,11 @@ Returns: available worlds from the Gateway.
 - `alias` (optional): display name to present while joining
 
 Provide either `world_id` or `address`.
+
+### world_info
+- `world_id` (optional): world ID. Auto-selected if only one world is joined.
+
+Returns: cached manifest for a joined world including full action param schemas (types, enums, constraints), rules, and lifecycle settings. Use this to discover exactly what parameters each action requires before calling `world_action`.
 
 ### world_action
 - `action` (required): action name from the world manifest (e.g. `say`, `set_state`, `post_memo`)

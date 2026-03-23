@@ -625,7 +625,7 @@ describe("world_action tool", () => {
     }
   })
 
-  it("awn_status includes available actions from cached manifest", async () => {
+  it("awn_status includes action signatures with param schemas", async () => {
     const worldAgentId = "aw:sha256:world-host"
     const harness = createHarness({
       pingInfo: { ok: true, data: { agentId: worldAgentId, publicKey: MOCK_WORLD_PUB } },
@@ -636,8 +636,14 @@ describe("world_action tool", () => {
           manifest: {
             name: "Arena",
             actions: {
-              say: { desc: "Say something" },
-              set_state: { desc: "Update your state" },
+              say: { desc: "Say something", params: { text: { type: "string", required: true } } },
+              set_state: {
+                desc: "Update your state",
+                params: {
+                  state: { type: "string", enum: ["idle", "writing", "error"] },
+                  detail: { type: "string", required: false, max: 200 },
+                },
+              },
             },
           },
           members: [],
@@ -657,8 +663,214 @@ describe("world_action tool", () => {
       const text = result.content[0].text
       assert.ok(text.includes("arena"))
       assert.ok(text.includes("Arena"))
-      assert.ok(text.includes("say (Say something)"))
-      assert.ok(text.includes("set_state (Update your state)"))
+      assert.ok(text.includes("say(text: string)"))
+      assert.ok(text.includes("Say something"))
+      assert.ok(text.includes('"idle"|"writing"|"error"'))
+      assert.ok(text.includes("detail?:"))
+      assert.ok(text.includes("[max 200]"))
+    } finally {
+      harness.restore()
+    }
+  })
+})
+
+describe("join_world action signatures", () => {
+  it("join_world response includes formatted action signatures", async () => {
+    const worldAgentId = "aw:sha256:world-host"
+    const harness = createHarness({
+      pingInfo: { ok: true, data: { agentId: worldAgentId, publicKey: MOCK_WORLD_PUB } },
+      joinResponse: {
+        ok: true,
+        data: {
+          worldId: "office",
+          manifest: {
+            name: "Star Office",
+            actions: {
+              set_state: {
+                desc: "Update agent's work status",
+                params: {
+                  state: { type: "string", enum: ["idle", "writing", "researching"] },
+                  detail: { type: "string", required: false, max: 200 },
+                },
+              },
+              heartbeat: { desc: "Keep-alive signal" },
+              post_memo: {
+                desc: "Post a work memo",
+                params: { content: { type: "string", max: 2000 } },
+              },
+            },
+          },
+          members: [],
+        },
+      },
+    })
+
+    try {
+      await harness.service.start()
+
+      const joinWorld = harness.tools.get("join_world")
+      const result = await joinWorld.execute("t-1", { address: "203.0.113.10:9000" })
+
+      const text = result.content[0].text
+      assert.ok(text.includes("Joined world 'office' (Star Office)"))
+      assert.ok(text.includes("Available actions:"))
+      assert.ok(text.includes('"idle"|"writing"|"researching"'))
+      assert.ok(text.includes("detail?:"))
+      assert.ok(text.includes("heartbeat()"))
+      assert.ok(text.includes("[max 2000]"))
+    } finally {
+      harness.restore()
+    }
+  })
+
+  it("join_world omits actions section when manifest has no actions", async () => {
+    const worldAgentId = "aw:sha256:world-host"
+    const harness = createHarness({
+      pingInfo: { ok: true, data: { agentId: worldAgentId, publicKey: MOCK_WORLD_PUB } },
+      joinResponse: {
+        ok: true,
+        data: {
+          worldId: "arena",
+          manifest: { name: "Arena" },
+          members: [],
+        },
+      },
+    })
+
+    try {
+      await harness.service.start()
+
+      const joinWorld = harness.tools.get("join_world")
+      const result = await joinWorld.execute("t-1", { address: "203.0.113.10:9000" })
+
+      const text = result.content[0].text
+      assert.ok(text.includes("Joined world 'arena' (Arena)"))
+      assert.equal(text.includes("Available actions:"), false)
+    } finally {
+      harness.restore()
+    }
+  })
+})
+
+describe("world_info tool", () => {
+  it("returns full manifest with action param schemas", async () => {
+    const worldAgentId = "aw:sha256:world-host"
+    const harness = createHarness({
+      pingInfo: { ok: true, data: { agentId: worldAgentId, publicKey: MOCK_WORLD_PUB } },
+      joinResponse: {
+        ok: true,
+        data: {
+          worldId: "office",
+          manifest: {
+            name: "Star Office",
+            description: "A collaborative workspace",
+            objective: "Work together",
+            actions: {
+              set_state: {
+                desc: "Update status",
+                params: {
+                  state: { type: "string", enum: ["idle", "writing"] },
+                },
+              },
+            },
+            rules: [
+              { text: "Be respectful", enforced: true },
+              { text: "Have fun", enforced: false },
+            ],
+            lifecycle: { evictionPolicy: "idle", idleTimeoutMs: 300000 },
+          },
+          members: [],
+        },
+      },
+    })
+
+    try {
+      await harness.service.start()
+
+      const joinWorld = harness.tools.get("join_world")
+      await joinWorld.execute("t-1", { address: "203.0.113.10:9000" })
+
+      const worldInfo = harness.tools.get("world_info")
+      const result = await worldInfo.execute("t-2", {})
+
+      const text = result.content[0].text
+      assert.ok(text.includes("World: Star Office (office)"))
+      assert.ok(text.includes("Description: A collaborative workspace"))
+      assert.ok(text.includes("Objective: Work together"))
+      assert.ok(text.includes("Actions:"))
+      assert.ok(text.includes('"idle"|"writing"'))
+      assert.ok(text.includes("[enforced] Be respectful"))
+      assert.ok(text.includes("[advisory] Have fun"))
+      assert.ok(text.includes("Lifecycle:"))
+      assert.ok(text.includes("evictionPolicy: idle"))
+    } finally {
+      harness.restore()
+    }
+  })
+
+  it("auto-selects single joined world", async () => {
+    const worldAgentId = "aw:sha256:world-host"
+    const harness = createHarness({
+      pingInfo: { ok: true, data: { agentId: worldAgentId, publicKey: MOCK_WORLD_PUB } },
+      joinResponse: {
+        ok: true,
+        data: { worldId: "arena", manifest: { name: "Arena" }, members: [] },
+      },
+    })
+
+    try {
+      await harness.service.start()
+
+      const joinWorld = harness.tools.get("join_world")
+      await joinWorld.execute("t-1", { address: "203.0.113.10:9000" })
+
+      const worldInfo = harness.tools.get("world_info")
+      const result = await worldInfo.execute("t-2", {})
+
+      assert.equal(result.isError, undefined)
+      assert.ok(result.content[0].text.includes("World: Arena (arena)"))
+    } finally {
+      harness.restore()
+    }
+  })
+
+  it("rejects when no worlds are joined", async () => {
+    const harness = createHarness()
+
+    try {
+      await harness.service.start()
+
+      const worldInfo = harness.tools.get("world_info")
+      const result = await worldInfo.execute("t-1", {})
+
+      assert.equal(result.isError, true)
+      assert.ok(result.content[0].text.includes("Not joined"))
+    } finally {
+      harness.restore()
+    }
+  })
+
+  it("rejects unknown world_id", async () => {
+    const worldAgentId = "aw:sha256:world-host"
+    const harness = createHarness({
+      pingInfo: { ok: true, data: { agentId: worldAgentId, publicKey: MOCK_WORLD_PUB } },
+      joinResponse: {
+        ok: true,
+        data: { worldId: "arena", manifest: { name: "Arena" }, members: [] },
+      },
+    })
+
+    try {
+      await harness.service.start()
+
+      const joinWorld = harness.tools.get("join_world")
+      await joinWorld.execute("t-1", { address: "203.0.113.10:9000" })
+
+      const worldInfo = harness.tools.get("world_info")
+      const result = await worldInfo.execute("t-2", { world_id: "nonexistent" })
+
+      assert.equal(result.isError, true)
+      assert.ok(result.content[0].text.includes("Not joined world 'nonexistent'"))
     } finally {
       harness.restore()
     }

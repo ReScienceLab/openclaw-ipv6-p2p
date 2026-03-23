@@ -21,7 +21,7 @@ import { parseDirectPeerAddress } from "./address"
 const AWN_TOOLS = [
   "awn_list_peers",
   "awn_send_message", "awn_status",
-  "list_worlds", "join_world", "world_action",
+  "list_worlds", "join_world", "world_action", "world_info",
 ]
 
 function ensureToolsAllowed(config: any): void {
@@ -70,13 +70,38 @@ let _agentMeta: { name?: string; version?: string; endpoints?: Endpoint[] } = {}
 let _transportManager: TransportManager | null = null
 let _quicTransport: UDPTransport | null = null
 
+// Action param/schema types (mirrors agent-world-sdk ActionParamSchema/ActionSchema)
+interface ActionParamSchema {
+  type: string
+  required?: boolean
+  desc?: string
+  min?: number
+  max?: number
+  enum?: Array<string | number>
+}
+
+interface ActionSchema {
+  desc: string
+  params?: Record<string, ActionParamSchema>
+  phase?: string[]
+}
+
 // Track joined worlds for periodic member refresh
 interface JoinedWorldInfo {
   agentId: string
   address: string
   port: number
   publicKey: string
-  manifest?: { name: string; actions?: Record<string, { desc: string; params?: Record<string, unknown> }> }
+  manifest?: {
+    name: string
+    description?: string
+    objective?: string
+    type?: string
+    theme?: string
+    actions?: Record<string, ActionSchema>
+    rules?: Array<{ id?: string; text: string; enforced: boolean }>
+    lifecycle?: Record<string, unknown>
+  }
 }
 const _joinedWorlds = new Map<string, JoinedWorldInfo>()
 const _worldMembersByWorld = new Map<string, Set<string>>()
@@ -86,6 +111,40 @@ let _memberRefreshTimer: ReturnType<typeof setInterval> | null = null
 let _welcomeTimer: ReturnType<typeof setTimeout> | null = null
 const MEMBER_REFRESH_INTERVAL_MS = 30_000
 const WORLD_MEMBER_REFRESH_FAILURE_LIMIT = 3
+
+function formatActionSignature(name: string, action: ActionSchema): string {
+  const params = action.params
+  if (!params || Object.keys(params).length === 0) {
+    return `${name}() — ${action.desc}`
+  }
+  const parts: string[] = []
+  for (const [pName, schema] of Object.entries(params)) {
+    const optional = schema.required === false ? "?" : ""
+    let typeStr: string
+    if (schema.enum && schema.enum.length > 0) {
+      typeStr = schema.enum.map(v => typeof v === "string" ? `"${v}"` : String(v)).join("|")
+    } else {
+      typeStr = schema.type || "unknown"
+    }
+    const constraints: string[] = []
+    if (schema.min !== undefined && schema.max !== undefined) {
+      constraints.push(`${schema.min}..${schema.max}`)
+    } else if (schema.max !== undefined) {
+      constraints.push(`max ${schema.max}`)
+    } else if (schema.min !== undefined) {
+      constraints.push(`min ${schema.min}`)
+    }
+    const suffix = constraints.length ? `[${constraints.join(", ")}]` : ""
+    parts.push(`${pName}${optional}: ${typeStr}${suffix}`)
+  }
+  return `${name}(${parts.join(", ")}) — ${action.desc}`
+}
+
+function formatActionsBlock(actions: Record<string, ActionSchema>, indent = "  "): string {
+  return Object.entries(actions)
+    .map(([name, action]) => `${indent}${formatActionSignature(name, action)}`)
+    .join("\n")
+}
 
 function trackWorldScopedPeer(agentId: string, worldId: string): void {
   let worldIds = _worldScopedPeerWorlds.get(agentId)
@@ -689,8 +748,8 @@ export default function register(api: any) {
         lines.push(`  ${id} — ${name}`)
         const actions = info.manifest?.actions
         if (actions && Object.keys(actions).length > 0) {
-          const actionList = Object.entries(actions).map(([k, v]) => `${k} (${v.desc})`).join(", ")
-          lines.push(`    Actions: ${actionList}`)
+          lines.push("    Actions:")
+          lines.push(formatActionsBlock(actions, "      "))
         }
       }
       return { content: [{ type: "text", text: lines.join("\n") }] }
@@ -879,7 +938,13 @@ export default function register(api: any) {
         _memberRefreshTimer = setInterval(refreshWorldMembers, MEMBER_REFRESH_INTERVAL_MS)
       }
 
-      return { content: [{ type: "text", text: `Joined world '${worldId}' — ${memberCount} other member(s) discovered` }] }
+      const lines = [`Joined world '${worldId}' (${worldName}) — ${memberCount} other member(s)`]
+      if (manifest?.actions && Object.keys(manifest.actions).length > 0) {
+        lines.push("")
+        lines.push("Available actions:")
+        lines.push(formatActionsBlock(manifest.actions))
+      }
+      return { content: [{ type: "text", text: lines.join("\n") }] }
     },
   })
 
@@ -931,6 +996,77 @@ export default function register(api: any) {
         ? `\nState: ${JSON.stringify(result.data.state)}`
         : ""
       return { content: [{ type: "text", text: `Action '${params.action}' executed in world '${worldId}'.${stateText}` }] }
+    },
+  })
+
+  api.registerTool({
+    name: "world_info",
+    description: "Show the cached manifest for a joined world: actions with full param schemas, rules, and lifecycle settings.",
+    parameters: {
+      type: "object",
+      properties: {
+        world_id: { type: "string", description: "World ID. Auto-selected if only one world is joined." },
+      },
+      required: [],
+    },
+    async execute(_id: string, params: { world_id?: string }) {
+      if (!identity) {
+        return { content: [{ type: "text", text: "AWN service not started." }], isError: true }
+      }
+      if (_joinedWorlds.size === 0) {
+        return { content: [{ type: "text", text: "Not joined any worlds. Use join_world first." }], isError: true }
+      }
+
+      let worldId = params.world_id
+      if (!worldId) {
+        if (_joinedWorlds.size === 1) {
+          worldId = [..._joinedWorlds.keys()][0]
+        } else {
+          const ids = [..._joinedWorlds.keys()].join(", ")
+          return { content: [{ type: "text", text: `Multiple worlds joined (${ids}). Specify world_id.` }], isError: true }
+        }
+      }
+
+      const info = _joinedWorlds.get(worldId)
+      if (!info) {
+        return { content: [{ type: "text", text: `Not joined world '${worldId}'.` }], isError: true }
+      }
+
+      const manifest = info.manifest
+      const lines: string[] = []
+      lines.push(`World: ${manifest?.name ?? worldId} (${worldId})`)
+      if (manifest?.description) lines.push(`Description: ${manifest.description}`)
+      if (manifest?.objective) lines.push(`Objective: ${manifest.objective}`)
+      if (manifest?.type) lines.push(`Type: ${manifest.type}`)
+      if (manifest?.theme && manifest.theme !== "default") lines.push(`Theme: ${manifest.theme}`)
+
+      const actions = manifest?.actions
+      if (actions && Object.keys(actions).length > 0) {
+        lines.push("")
+        lines.push("Actions:")
+        lines.push(formatActionsBlock(actions))
+      }
+
+      const rules = manifest?.rules
+      if (rules && rules.length > 0) {
+        lines.push("")
+        lines.push("Rules:")
+        for (const rule of rules) {
+          const prefix = rule.enforced ? "[enforced]" : "[advisory]"
+          lines.push(`  ${prefix} ${rule.text}`)
+        }
+      }
+
+      const lifecycle = manifest?.lifecycle
+      if (lifecycle && Object.keys(lifecycle).length > 0) {
+        lines.push("")
+        lines.push("Lifecycle:")
+        for (const [key, value] of Object.entries(lifecycle)) {
+          lines.push(`  ${key}: ${value}`)
+        }
+      }
+
+      return { content: [{ type: "text", text: lines.join("\n") }] }
     },
   })
 

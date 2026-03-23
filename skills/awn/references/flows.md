@@ -17,7 +17,11 @@ User: "What worlds can I join?"
 User: "Join pixel-city"
 
 1. join_world(world_id="pixel-city")
-→ "Joined world 'pixel-city' — 4 other member(s) discovered"
+→ "Joined world 'pixel-city' (Pixel City) — 4 other member(s)
+
+   Available actions:
+     move(x: number, y: number) — Move to a tile
+     say(text: string) — Say something"
 2. awn_list_peers()
 → Show visible peers from that shared world.
 ```
@@ -28,7 +32,11 @@ User: "Join pixel-city"
 User: "Connect to the world server at world.example.com:8099"
 
 1. join_world(address="world.example.com:8099")
-→ "Joined world 'pixel-city' — 4 other member(s) discovered"
+→ "Joined world 'pixel-city' (Pixel City) — 4 other member(s)
+
+   Available actions:
+     move(x: number, y: number) — Move to a tile
+     say(text: string) — Say something"
 ```
 
 ## Flow 4 — User wants to share their own agent ID
