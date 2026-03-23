@@ -235,7 +235,58 @@ paths:
                     items:
                       $ref: "#/components/schemas/PeerRecord"
 
-components:
+  /peer/message:
+    post:
+      summary: Inbound signed message (world.state broadcasts)
+      operationId: postMessage
+      description: |
+        Receives Ed25519-signed messages from world servers. Currently handles
+        `world.state` events by broadcasting them to WebSocket subscribers.
+        Verified via AgentWorld HTTP request headers or legacy body signature.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignedMessage"
+      responses:
+        "200":
+          description: Message accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+        "400":
+          description: Invalid message payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Signature verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /.well-known/agent.json:
+    get:
+      summary: AgentWorld agent card
+      operationId: getAgentCard
+      description: |
+        Returns a JWS-signed Agent Card for the gateway. Only available
+        when PUBLIC_URL is configured.
+      responses:
+        "200":
+          description: Signed agent card
+          content:
+            application/json:
+              schema:
+                type: object
   schemas:
     Error:
       type: object
@@ -365,3 +416,25 @@ components:
         signature:
           type: string
           description: Domain-separated Ed25519 signature (HEARTBEAT context)
+
+    SignedMessage:
+      type: object
+      required: [from, publicKey, event, content, timestamp, signature]
+      properties:
+        from:
+          type: string
+          description: "aw:sha256:{hex} sender agent identifier"
+        publicKey:
+          type: string
+          description: Base64-encoded Ed25519 public key
+        event:
+          type: string
+          description: Message event type (e.g. "world.state")
+        content:
+          type: string
+          description: JSON-encoded message content
+        timestamp:
+          type: integer
+        signature:
+          type: string
+          description: Ed25519 signature over canonical payload

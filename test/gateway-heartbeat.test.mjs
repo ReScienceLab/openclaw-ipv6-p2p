@@ -88,6 +88,24 @@ describe("Gateway /peer/heartbeat", () => {
     assert.equal(resp.statusCode, 400)
   })
 
+  it("returns 400 for timestamp out of range", async () => {
+    const kp = makeKeypair()
+
+    // Sign heartbeat with a timestamp 10 minutes in the past
+    const staleTs = Date.now() - 10 * 60 * 1000
+    const payload = { agentId: kp.agentId, ts: staleTs }
+    const signature = signWithDomainSeparator(DOMAIN_SEPARATORS.HEARTBEAT, payload, kp.secretKey)
+
+    const resp = await app.inject({
+      method: "POST",
+      url: "/peer/heartbeat",
+      payload: { ...payload, signature },
+    })
+    assert.equal(resp.statusCode, 400)
+    const body = JSON.parse(resp.body)
+    assert.equal(body.error, "Timestamp out of range")
+  })
+
   it("updates lastSeen in registry", async () => {
     const kp = makeKeypair()
 

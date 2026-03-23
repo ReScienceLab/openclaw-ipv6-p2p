@@ -75,6 +75,7 @@ export async function createGatewayApp(opts = {}) {
     publicAddr = DEFAULT_PUBLIC_ADDR,
     publicUrl = DEFAULT_PUBLIC_URL,
     staleTtlMs = DEFAULT_STALE_TTL_MS,
+    webhookUrl = WEBHOOK_URL,
   } = opts
 
   const REGISTRY_PATH = path.join(dataDir, "registry.json")
@@ -209,8 +210,8 @@ export async function createGatewayApp(opts = {}) {
     if (persist && (changed || trimmed)) {
       saveRegistry()
     }
-    if (firstSeen && WEBHOOK_URL) {
-      fetch(WEBHOOK_URL, {
+    if (firstSeen && webhookUrl) {
+      fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event: "world.announced", agentId, ts: Date.now() }),
@@ -226,7 +227,7 @@ export async function createGatewayApp(opts = {}) {
       if (p.lastSeen < cutoff) { registry.delete(id); pruned++ }
     }
     if (pruned > 0) {
-      console.log(`[gateway] Pruned ${pruned} stale agent(s) (TTL ${Math.round(ttl / 60000)}min)`)
+      console.log(`[gateway] Pruned ${pruned} stale agent(s) (TTL ${ttl / 1000}s)`)
       flushRegistry()
     }
   }
@@ -505,6 +506,9 @@ export async function createGatewayApp(opts = {}) {
     peer.post("/peer/heartbeat", async (req, reply) => {
       const { agentId, ts, signature } = req.body ?? {};
       if (!agentId || !ts || !signature) return reply.code(400).send({ error: "Invalid heartbeat" });
+
+      const skew = Math.abs(Date.now() - ts);
+      if (skew > 5 * 60 * 1000) return reply.code(400).send({ error: "Timestamp out of range" });
 
       const existing = registry.get(agentId);
       if (!existing) return reply.code(404).send({ error: "Unknown agent" });
