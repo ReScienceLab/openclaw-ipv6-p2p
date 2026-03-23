@@ -41,11 +41,11 @@ jobs:
         run: |
           GATEWAY_HOST=$(echo "$GATEWAY_URL" | sed 's|^https\?://||' | cut -d'/' -f1)
 
-          EC2_IP=$(aws ec2 describe-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --region us-east-2 \
-            --query "Reservations[0].Instances[0].PublicIpAddress" \
-            --output text)
+          EC2_IP="${{ vars.EC2_PUBLIC_IP }}"
+          if [ -z "$EC2_IP" ]; then
+            echo "::error::EC2_PUBLIC_IP variable is not set. Add it in repo Settings → Variables."
+            exit 1
+          fi
           echo "EC2 public IP: $EC2_IP  Gateway: $GATEWAY_HOST"
 
           EXISTING=$(curl -sf \
