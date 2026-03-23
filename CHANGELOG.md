@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.4
+
+### Patch Changes
+
+- 6637571: Fix plugin id mismatch: openclaw.plugin.json id changed from "awn" to "agent-world-network" to match the npm package name and eliminate the startup warning.
+- 52fc219: Fix gateway /world/:worldId response missing publicKey field. join_world(world_id=...) was always failing with "World public key is unavailable; cannot verify signed membership refreshes" because the publicKey was stored on announce but omitted from the world record response.
+
 ## 1.1.3
 
 ### Patch Changes
