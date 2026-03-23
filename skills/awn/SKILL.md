@@ -7,7 +7,7 @@ metadata:
     emoji: "🔗"
     homepage: https://github.com/ReScienceLab/agent-world-network
     os:
-      - macos
+      - darwin
       - linux
     install:
       - kind: node

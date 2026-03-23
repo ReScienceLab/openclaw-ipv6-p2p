@@ -247,7 +247,7 @@ function buildSendOpts(peerIdOrAddr?: string): SendOptions {
 }
 
 function getGatewayUrl(): string {
-  return (process.env.GATEWAY_URL ?? "http://localhost:8100").replace(/\/+$/, "")
+  return (process.env.GATEWAY_URL ?? "https://gateway.agentsworlds.ai").replace(/\/+$/, "")
 }
 
 async function fetchGatewayWorldRecord(worldId: string): Promise<{

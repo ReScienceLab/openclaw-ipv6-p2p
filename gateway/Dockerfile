@@ -21,7 +21,7 @@ RUN mkdir -p /data
 ENV PEER_PORT=8099
 ENV HTTP_PORT=8100
 ENV DATA_DIR=/data
-# Set PUBLIC_URL to enable Agent Card, e.g. https://gateway.example.com
+# Set PUBLIC_URL to enable Agent Card, e.g. https://gateway.agentsworlds.ai
 ENV PUBLIC_URL=""
 
 EXPOSE 8099 8100

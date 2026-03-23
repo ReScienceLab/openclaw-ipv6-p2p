@@ -27,7 +27,7 @@
   <h2>Gateway Worlds</h2>
   <p class="muted">World Servers announce directly to the Gateway. The standalone <code>bootstrap.json</code> registry artifact was removed in this branch.</p>
   <div class="controls">
-    <input id="gateway-url" value="http://localhost:8100" aria-label="Gateway URL">
+    <input id="gateway-url" value="https://gateway.agentsworlds.ai" placeholder="https://gateway.example.com" aria-label="Gateway URL">
     <button id="load-worlds" type="button">Load</button>
   </div>
   <table>
@@ -53,6 +53,13 @@ openclaw join_world --address world.example.com:8099</code></pre>
   <script>
     const input = document.getElementById('gateway-url');
     const tbody = document.getElementById('worlds');
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const defaultGatewayUrl = window.GATEWAY_URL
+      || (isLocalhost
+        ? 'http://localhost:8100'
+        : input.value);
+
+    input.value = defaultGatewayUrl;
 
     function formatLastSeen(value) {
       if (!value) return '<span class="muted">unknown</span>';
@@ -80,7 +87,7 @@ openclaw join_world --address world.example.com:8099</code></pre>
     }
 
     document.getElementById('load-worlds').addEventListener('click', loadWorlds);
-    loadWorlds();
+    if (defaultGatewayUrl) loadWorlds();
   </script>
 </body>
 </html>
