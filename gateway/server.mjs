@@ -10,6 +10,10 @@
  *   GET  /worlds          — list discovered world:* agents on AWN network
  *   GET  /agents          — list all known AWN agents
  *   GET  /world/:worldId  — info about a specific world
+ *   GET  /peer/ping       — peer liveness
+ *   GET  /peer/peers      — known peers exchange
+ *   POST /peer/announce   — world server registration
+ *   POST /peer/message    — inbound signed message (world.state broadcasts)
  *
  * WebSocket:
  *   WS   /ws?world=<worldId>  — subscribe to a world's real-time events
@@ -20,8 +24,8 @@
  *                        { type: "error", message: "..." }
  *
  * Env:
- *   PEER_PORT         — AWN peer HTTP port (default 8099)
  *   HTTP_PORT         — gateway public HTTP port (default 8100)
+ *   PEER_PORT         — outbound port for world agent connections (default 8099)
  *   PUBLIC_ADDR       — own public IP/hostname for AWN announce
  *   DATA_DIR          — identity persistence (default /data)
  */
@@ -285,85 +289,6 @@ async function sendToWorld(worldId, event, content) {
 }
 
 // ---------------------------------------------------------------------------
-// AWN peer server (receive world.state broadcasts from World Agents)
-// ---------------------------------------------------------------------------
-
-async function startPeerListener() {
-  const peerServer = Fastify({ logger: false });
-
-  // Preserve raw request body for Content-Digest verification
-  peerServer.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => {
-    try {
-      req.rawBody = body;
-      done(null, JSON.parse(body));
-    } catch (err) {
-      done(err, undefined);
-    }
-  });
-
-  peerServer.get("/peer/ping", async () => ({ ok: true, ts: Date.now(), role: "gateway" }));
-  peerServer.get("/peer/peers", async () => ({ peers: getAgentsForExchange() }));
-
-  peerServer.post("/peer/announce", async (req, reply) => {
-    const ann = req.body;
-    if (!ann?.publicKey || !ann?.from) return reply.code(400).send({ error: "Invalid announce" });
-
-    const awSig = req.headers["x-agentworld-signature"];
-    if (awSig) {
-      const authority = req.headers["host"] ?? "localhost";
-      const result = verifyHttpRequestHeaders(req.headers, req.method, req.url, authority, req.rawBody, ann.publicKey);
-      if (!result.ok) return reply.code(403).send({ error: result.error });
-    } else {
-      const { signature, ...signable } = ann;
-      // Try domain-separated verification first, then fall back to plain for backward compat
-      const domainOk = verifyWithDomainSeparator(DOMAIN_SEPARATORS.ANNOUNCE, ann.publicKey, signable, signature);
-      if (!domainOk && !verifySignature(ann.publicKey, signable, signature)) {
-        return reply.code(403).send({ error: "Invalid signature" });
-      }
-    }
-
-    if (agentIdFromPublicKey(ann.publicKey) !== ann.from) {
-      return reply.code(400).send({ error: "agentId mismatch" });
-    }
-    upsertAgent(ann.from, ann.publicKey, {
-      alias: ann.alias, endpoints: ann.endpoints, capabilities: ann.capabilities, persist: true,
-    });
-    return { ok: true, peers: getAgentsForExchange(20) };
-  });
-
-  peerServer.post("/peer/message", async (req, reply) => {
-    const msg = req.body;
-    if (!msg?.publicKey || !msg?.from) return reply.code(400).send({ error: "Invalid message" });
-
-    const awSig = req.headers["x-agentworld-signature"];
-    if (awSig) {
-      const authority = req.headers["host"] ?? "localhost";
-      const result = verifyHttpRequestHeaders(req.headers, req.method, req.url, authority, req.rawBody, msg.publicKey);
-      if (!result.ok) return reply.code(403).send({ error: result.error });
-    } else {
-      const { signature, ...signable } = msg;
-      if (!verifySignature(msg.publicKey, signable, signature)) {
-        return reply.code(403).send({ error: "Invalid signature" });
-      }
-    }
-
-    // Handle world.state broadcasts from World Agents
-    if (msg.event === "world.state") {
-      let state;
-      try { state = typeof msg.content === "string" ? JSON.parse(msg.content) : msg.content; } catch { return { ok: true }; }
-      const worldId = state.worldId;
-      if (worldId) broadcast(worldId, { type: "world.state", ...state });
-    }
-
-    return { ok: true };
-  });
-
-  await peerServer.listen({ port: PEER_PORT, host: "::" });
-  console.log(`[gateway] AWN peer listener on [::]:${PEER_PORT}`);
-  return peerServer
-}
-
-// ---------------------------------------------------------------------------
 // Public HTTP + WebSocket server
 // ---------------------------------------------------------------------------
 
@@ -510,10 +435,84 @@ app.get("/ws", { websocket: true }, (socket, req) => {
 });
 
 // ---------------------------------------------------------------------------
+// Peer routes (unified on HTTP_PORT — previously a separate server on PEER_PORT)
+// Scoped in a plugin so the rawBody content-type parser is isolated to /peer/*
+// ---------------------------------------------------------------------------
+
+await app.register(async (peer) => {
+  // rawBody needed for Content-Digest verification; scoped here to avoid
+  // overriding the default JSON parser on all other routes
+  peer.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => {
+    try {
+      req.rawBody = body;
+      done(null, JSON.parse(body));
+    } catch (err) {
+      done(err, undefined);
+    }
+  });
+
+  peer.get("/peer/ping", async () => ({ ok: true, ts: Date.now(), role: "gateway" }));
+  peer.get("/peer/peers", async () => ({ peers: getAgentsForExchange() }));
+
+  peer.post("/peer/announce", async (req, reply) => {
+    const ann = req.body;
+    if (!ann?.publicKey || !ann?.from) return reply.code(400).send({ error: "Invalid announce" });
+
+    const awSig = req.headers["x-agentworld-signature"];
+    if (awSig) {
+      const authority = req.headers["host"] ?? "localhost";
+      const result = verifyHttpRequestHeaders(req.headers, req.method, req.url, authority, req.rawBody, ann.publicKey);
+      if (!result.ok) return reply.code(403).send({ error: result.error });
+    } else {
+      const { signature, ...signable } = ann;
+      // Try domain-separated verification first, then fall back to plain for backward compat
+      const domainOk = verifyWithDomainSeparator(DOMAIN_SEPARATORS.ANNOUNCE, ann.publicKey, signable, signature);
+      if (!domainOk && !verifySignature(ann.publicKey, signable, signature)) {
+        return reply.code(403).send({ error: "Invalid signature" });
+      }
+    }
+
+    if (agentIdFromPublicKey(ann.publicKey) !== ann.from) {
+      return reply.code(400).send({ error: "agentId mismatch" });
+    }
+    upsertAgent(ann.from, ann.publicKey, {
+      alias: ann.alias, endpoints: ann.endpoints, capabilities: ann.capabilities, persist: true,
+    });
+    return { ok: true, peers: getAgentsForExchange(20) };
+  });
+
+  peer.post("/peer/message", async (req, reply) => {
+    const msg = req.body;
+    if (!msg?.publicKey || !msg?.from) return reply.code(400).send({ error: "Invalid message" });
+
+    const awSig = req.headers["x-agentworld-signature"];
+    if (awSig) {
+      const authority = req.headers["host"] ?? "localhost";
+      const result = verifyHttpRequestHeaders(req.headers, req.method, req.url, authority, req.rawBody, msg.publicKey);
+      if (!result.ok) return reply.code(403).send({ error: result.error });
+    } else {
+      const { signature, ...signable } = msg;
+      if (!verifySignature(msg.publicKey, signable, signature)) {
+        return reply.code(403).send({ error: "Invalid signature" });
+      }
+    }
+
+    if (msg.event === "world.state") {
+      let state;
+      try { state = typeof msg.content === "string" ? JSON.parse(msg.content) : msg.content; } catch { return { ok: true }; }
+      const worldId = state.worldId;
+      if (worldId) broadcast(worldId, { type: "world.state", ...state });
+    }
+
+    return { ok: true };
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------------
 
-async function shutdown(signal, peerServer) {
+async function shutdown(signal) {
   if (_shutdownPromise) return _shutdownPromise
 
   _shutdownPromise = (async () => {
@@ -529,13 +528,7 @@ async function shutdown(signal, peerServer) {
     try {
       await app.close()
     } catch (error) {
-      console.warn("[gateway] Failed to close public server cleanly", error)
-    }
-
-    try {
-      await peerServer.close()
-    } catch (error) {
-      console.warn("[gateway] Failed to close peer server cleanly", error)
+      console.warn("[gateway] Failed to close server cleanly", error)
     }
   })()
 
@@ -543,15 +536,14 @@ async function shutdown(signal, peerServer) {
 }
 
 loadRegistry()
-const peerServer = await startPeerListener()
 await app.listen({ port: HTTP_PORT, host: "::" })
-console.log(`[gateway] Public HTTP on [::]:${HTTP_PORT}`)
+console.log(`[gateway] HTTP on [::]:${HTTP_PORT}`)
 
 // Prune stale agents every 3 minutes
 _pruneTimer = setInterval(() => pruneStaleAgents(), 3 * 60 * 1000)
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.once(signal, () => {
-    void shutdown(signal, peerServer)
+    void shutdown(signal)
   })
 }

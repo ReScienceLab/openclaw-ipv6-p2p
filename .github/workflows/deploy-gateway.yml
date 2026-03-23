@@ -105,14 +105,13 @@ jobs:
           # credential helper for authentication instead of the aws CLI.
           PARAMS=$(jq -cn \
             --arg pull "docker pull $IMAGE" \
-            --arg run "docker run -d --name awn-gateway --restart unless-stopped -p 8099:8099 -p 80:8100 -v /opt/awn-gateway/data:/data -e PEER_PORT=8099 -e HTTP_PORT=8100 -e DATA_DIR=/data -e PUBLIC_URL=$GATEWAY_URL -e PUBLIC_ADDR=$(echo $GATEWAY_URL | sed 's|^https\?://||' | cut -d'/' -f1) $IMAGE" \
+            --arg run "docker run -d --name awn-gateway --restart unless-stopped -p 80:8100 -v /opt/awn-gateway/data:/data -e HTTP_PORT=8100 -e DATA_DIR=/data -e PUBLIC_URL=$GATEWAY_URL -e PUBLIC_ADDR=$(echo $GATEWAY_URL | sed 's|^https\?://||' | cut -d'/' -f1) $IMAGE" \
             '{commands: [
               "command -v amazon-ecr-credential-helper >/dev/null 2>&1 || apt-get install -y amazon-ecr-credential-helper",
               "mkdir -p /root/.docker && printf '"'"'{\"credsStore\":\"ecr-login\"}'"'"' > /root/.docker/config.json",
               $pull,
               "docker stop awn-gateway 2>/dev/null || true",
               "docker rm awn-gateway 2>/dev/null || true",
-              "fuser -k 8099/tcp 2>/dev/null || true",
               "fuser -k 80/tcp 2>/dev/null || true",
               $run
             ]}')

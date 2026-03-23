@@ -7,7 +7,7 @@ import {
 import type { Identity } from "./types.js";
 import type { PeerDb } from "./peer-db.js";
 
-const DEFAULT_GATEWAY_URL = "http://localhost:8099";
+const DEFAULT_GATEWAY_URL = "http://localhost:8100";
 
 export interface AnnounceOpts {
   identity: Identity;

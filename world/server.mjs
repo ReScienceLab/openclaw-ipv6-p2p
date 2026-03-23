@@ -16,7 +16,7 @@
  *   PEER_PORT     — AWN HTTP port (default 8099)
  *   PUBLIC_PORT   — externally reachable port for AWN announce (default PEER_PORT)
  *   DATA_DIR      — persistence directory (default /data)
- *   GATEWAY_URL   — URL of the AWN Gateway peer endpoint (default http://localhost:8099)
+ *   GATEWAY_URL   — URL of the AWN Gateway peer endpoint (default http://localhost:8100)
  *   BROADCAST_INTERVAL_MS — how often to broadcast world.state (default 5000)
  *   MAX_AGENTS    — max agents allowed in world (default 0 = unlimited)
  *   WORLD_PUBLIC  — whether to announce to AWN network (default "true")
