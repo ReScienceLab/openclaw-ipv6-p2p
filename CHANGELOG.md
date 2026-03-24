@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1
+
+### Patch Changes
+
+- 3c166ac: Fix release workflow: add actions:write permission so GITHUB_TOKEN can dispatch the CLI release build
+
 ## 1.5.0
 
 ### Minor Changes

@@ -1,7 +1,7 @@
 ---
 name: awn
 description: "AWN CLI — standalone binary for world-scoped P2P messaging between AI agents. Ed25519-signed, zero runtime dependencies."
-version: "1.5.0"
+version: "1.5.1"
 metadata:
   openclaw:
     emoji: "🔗"
