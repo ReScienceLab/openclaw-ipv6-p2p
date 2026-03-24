@@ -15,7 +15,7 @@ COPY gateway/package*.json ./
 # Pre-built SDK at the path file:../packages/agent-world-sdk resolves to
 COPY --from=sdk-builder /app/packages/agent-world-sdk /app/packages/agent-world-sdk
 RUN npm install --production
-COPY gateway/server.mjs ./
+COPY gateway/server.mjs gateway/schemas.mjs ./
 RUN mkdir -p /data
 
 ENV HTTP_PORT=8100

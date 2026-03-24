@@ -38,6 +38,8 @@ import { fileURLToPath } from "node:url"
 import Fastify from "fastify"
 import websocketPlugin from "@fastify/websocket"
 import cors from "@fastify/cors"
+import swagger from "@fastify/swagger"
+import swaggerUi from "@fastify/swagger-ui"
 import nacl from "tweetnacl"
 import {
   agentIdFromPublicKey,
@@ -326,7 +328,53 @@ export async function createGatewayApp(opts = {}) {
   await app.register(cors, { origin: true });
   await app.register(websocketPlugin);
 
-  app.get("/health", async () => {
+  const { allSchemas } = await import("./schemas.mjs");
+  await app.register(swagger, {
+    openapi: {
+      info: {
+        title: "AWN Gateway",
+        description:
+          "Agent World Network Gateway — stateless portal + WebSocket bridge.\n" +
+          "World Servers announce directly via POST /peer/announce and stay alive\n" +
+          "with periodic POST /peer/heartbeat signals.\n\n" +
+          "**WebSocket** — `ws://{host}/ws?world={worldId}` subscribes to a world's\n" +
+          "real-time events (world.state broadcasts, join/leave/action messages).",
+        version: "0.5.0",
+        license: { name: "MIT" },
+      },
+      servers: [{ url: "http://localhost:8100", description: "Local development" }],
+    },
+    refResolver: {
+      buildLocalReference(json) {
+        return json.$id || json.title || `def-${json.$id}`
+      },
+    },
+  });
+  for (const s of allSchemas) app.addSchema(s);
+  await app.register(swaggerUi, { routePrefix: "/docs" });
+
+  app.get("/health", {
+    schema: {
+      summary: "Health check",
+      operationId: "getHealth",
+      tags: ["gateway"],
+      response: {
+        200: {
+          type: "object",
+          required: ["ok", "ts", "agentId", "agents", "worlds", "status"],
+          properties: {
+            ok: { type: "boolean" },
+            ts: { type: "integer", description: "Unix timestamp (ms)" },
+            agentId: { type: "string" },
+            agents: { type: "integer", description: "Number of known agents" },
+            worlds: { type: "integer", description: "Number of discovered worlds" },
+            registryAge: { type: ["integer", "null"], description: "Milliseconds since last registry modification" },
+            status: { type: "string", enum: ["ready", "warming", "empty"] },
+          },
+        },
+      },
+    },
+  }, async () => {
     const ts = Date.now()
     const worlds = findByCapability("world:").length
     const agents = registry.size
@@ -347,7 +395,15 @@ export async function createGatewayApp(opts = {}) {
   });
 
   let _cachedCardJson = null
-  app.get("/.well-known/agent.json", async (_req, reply) => {
+  app.get("/.well-known/agent.json", {
+    schema: {
+      summary: "AgentWorld agent card",
+      operationId: "getAgentCard",
+      tags: ["gateway"],
+      description: "Returns a JWS-signed Agent Card for the gateway.",
+      response: { 200: { type: "object" } },
+    },
+  }, async (_req, reply) => {
     if (!_cachedCardJson) {
       const cardUrl = publicUrl
         ? `${publicUrl.replace(/\/$/, "")}/.well-known/agent.json`
@@ -362,11 +418,37 @@ export async function createGatewayApp(opts = {}) {
     reply.send(_cachedCardJson);
   });
 
-  app.get("/agents", async () => ({
+  app.get("/agents", {
+    schema: {
+      summary: "List all known AWN agents",
+      operationId: "getAgents",
+      tags: ["gateway"],
+      response: {
+        200: {
+          type: "object",
+          required: ["agents"],
+          properties: { agents: { type: "array", items: { $ref: "PeerRecord#" } } },
+        },
+      },
+    },
+  }, async () => ({
     agents: getAgentsForExchange(100),
   }));
 
-  app.get("/worlds", async () => {
+  app.get("/worlds", {
+    schema: {
+      summary: "List discovered worlds",
+      operationId: "getWorlds",
+      tags: ["gateway"],
+      response: {
+        200: {
+          type: "object",
+          required: ["worlds"],
+          properties: { worlds: { type: "array", items: { $ref: "WorldSummary#" } } },
+        },
+      },
+    },
+  }, async () => {
     const worlds = findByCapability("world:");
     return {
       worlds: worlds.map((w) => {
@@ -384,7 +466,22 @@ export async function createGatewayApp(opts = {}) {
     };
   });
 
-  app.get("/world/:worldId", async (req, reply) => {
+  app.get("/world/:worldId", {
+    schema: {
+      summary: "Get info about a specific world",
+      operationId: "getWorld",
+      tags: ["gateway"],
+      params: {
+        type: "object",
+        required: ["worldId"],
+        properties: { worldId: { type: "string" } },
+      },
+      response: {
+        200: { $ref: "WorldDetail#" },
+        404: { $ref: "Error#" },
+      },
+    },
+  }, async (req, reply) => {
     const { worldId } = req.params;
     const worlds = findByCapability(`world:${worldId}`);
     if (!worlds.length) return reply.code(404).send({ error: "World not found" });
@@ -477,10 +574,67 @@ export async function createGatewayApp(opts = {}) {
       }
     });
 
-    peer.get("/peer/ping", async () => ({ ok: true, ts: Date.now(), role: "gateway" }));
-    peer.get("/peer/peers", async () => ({ peers: getAgentsForExchange() }));
+    // Skip body validation for peer routes — signature verification is the
+    // validation layer, and Fastify's schema validation would interfere with
+    // the custom content parser that preserves rawBody for signature checks.
+    const noValidate = () => () => true;
+    peer.setValidatorCompiler(noValidate);
 
-    peer.post("/peer/announce", async (req, reply) => {
+    peer.get("/peer/ping", {
+      schema: {
+        summary: "Peer liveness check",
+        operationId: "getPeerPing",
+        tags: ["peer"],
+        response: {
+          200: {
+            type: "object",
+            required: ["ok", "ts", "role"],
+            properties: {
+              ok: { type: "boolean" },
+              ts: { type: "integer" },
+              role: { type: "string", enum: ["gateway"] },
+            },
+          },
+        },
+      },
+    }, async () => ({ ok: true, ts: Date.now(), role: "gateway" }));
+
+    peer.get("/peer/peers", {
+      schema: {
+        summary: "Exchange known peers",
+        operationId: "getPeerPeers",
+        tags: ["peer"],
+        response: {
+          200: {
+            type: "object",
+            required: ["peers"],
+            properties: { peers: { type: "array", items: { $ref: "PeerRecord#" } } },
+          },
+        },
+      },
+    }, async () => ({ peers: getAgentsForExchange() }));
+
+    peer.post("/peer/announce", {
+      schema: {
+        summary: "Register or re-announce a world server",
+        operationId: "postAnnounce",
+        tags: ["peer"],
+        description: "Ed25519-signed announcement from a world server.",
+        body: { $ref: "AnnounceRequest#" },
+        response: {
+          200: {
+            type: "object",
+            required: ["ok", "peers"],
+            properties: {
+              ok: { type: "boolean" },
+              peers: { type: "array", items: { $ref: "PeerRecord#" } },
+            },
+          },
+          400: { $ref: "Error#" },
+          403: { $ref: "Error#" },
+        },
+      },
+    }, async (req, reply) => {
       const ann = req.body;
       if (!ann?.publicKey || !ann?.from) return reply.code(400).send({ error: "Invalid announce" });
 
@@ -506,7 +660,21 @@ export async function createGatewayApp(opts = {}) {
       return { ok: true, peers: getAgentsForExchange(20) };
     });
 
-    peer.post("/peer/heartbeat", async (req, reply) => {
+    peer.post("/peer/heartbeat", {
+      schema: {
+        summary: "Lightweight liveness heartbeat",
+        operationId: "postHeartbeat",
+        tags: ["peer"],
+        description: "Updates an agent's lastSeen without a full re-announce.",
+        body: { $ref: "HeartbeatRequest#" },
+        response: {
+          200: { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } },
+          400: { $ref: "Error#" },
+          403: { $ref: "Error#" },
+          404: { $ref: "Error#" },
+        },
+      },
+    }, async (req, reply) => {
       const { agentId, ts, signature } = req.body ?? {};
       if (!agentId || !ts || !signature) return reply.code(400).send({ error: "Invalid heartbeat" });
 
@@ -529,7 +697,20 @@ export async function createGatewayApp(opts = {}) {
       return { ok: true };
     });
 
-    peer.post("/peer/message", async (req, reply) => {
+    peer.post("/peer/message", {
+      schema: {
+        summary: "Inbound signed message (world.state broadcasts)",
+        operationId: "postMessage",
+        tags: ["peer"],
+        description: "Receives Ed25519-signed messages from world servers.",
+        body: { $ref: "SignedMessage#" },
+        response: {
+          200: { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } },
+          400: { $ref: "Error#" },
+          403: { $ref: "Error#" },
+        },
+      },
+    }, async (req, reply) => {
       const msg = req.body;
       if (!msg?.publicKey || !msg?.from) return reply.code(400).send({ error: "Invalid message" });
 
