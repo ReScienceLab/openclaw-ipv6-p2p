@@ -127,7 +127,7 @@ window.connectToWorld = function(worldId) {
 
 window.viewWorldInfo = async function(worldId) {
   try {
-    const resp = await fetch(`${GATEWAY}/world/${worldId}`, { signal: AbortSignal.timeout(5_000) });
+    const resp = await fetch(`${GATEWAY}/worlds/${worldId}`, { signal: AbortSignal.timeout(5_000) });
     const data = await resp.json();
     alert(JSON.stringify(data, null, 2));
   } catch (e) {

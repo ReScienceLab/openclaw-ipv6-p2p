@@ -557,6 +557,7 @@ export async function createGatewayApp(opts = {}) {
       removed++;
     }
     _registryModifiedAt = Date.now();
+    flushRegistry();
     console.log(`[gateway] Deregistered world:${worldId} (${removed} agent(s) removed)`);
     return { ok: true, removed };
   });
@@ -615,6 +616,7 @@ export async function createGatewayApp(opts = {}) {
     if (!registry.has(agentId)) return reply.code(404).send({ error: "Agent not found" });
     registry.delete(agentId);
     _registryModifiedAt = Date.now();
+    flushRegistry();
     console.log(`[gateway] Deregistered agent:${agentId}`);
     return { ok: true };
   });
