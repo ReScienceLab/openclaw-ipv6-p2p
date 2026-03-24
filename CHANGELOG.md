@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.6.0
+
+### Minor Changes
+
+- d3b4058: feat(cli): add join/leave/ping/send commands for full plugin parity
+
+  The standalone AWN CLI (`awn`) now exposes all capabilities available in the OpenClaw plugin:
+
+  - `awn join <world_id|slug|host:port>` — join a world by ID, slug, or direct address; resolves via Gateway and sends a signed `world.join` P2P message
+  - `awn leave <world_id>` — send `world.leave` and remove from joined list
+  - `awn joined` — list currently joined worlds
+  - `awn ping <agent_id>` — check reachability of a known agent
+  - `awn send <agent_id> <message>` — send a signed `chat` P2P message to an agent
+
+  Adds `sign_http_request()` and `build_signed_p2p_message()` helpers to `crypto.rs` (wire-compatible with the TypeScript plugin). The daemon gains a `joined_worlds` state map and five new IPC routes.
+
+### Patch Changes
+
+- db7cdeb: fix(gateway): add /peer/announce backward-compat route and auto-redeploy on SDK version bump
+
+  - Add `POST /peer/announce` backward-compat route for SDK < 1.4 world containers (returns legacy `{peers:[]}` shape)
+  - Raise default `STALE_TTL_MS` from 90 s to 15 min to prevent old SDK worlds (10 min announce interval, no heartbeat) from being pruned between announces
+  - Add `packages/agent-world-sdk/package.json` to `deploy-gateway.yml` path triggers so any SDK minor version bump automatically redeploys the gateway (fixes 403 signature mismatch caused by `PROTOCOL_VERSION` changing without gateway redeploy)
+
 ## 1.5.1
 
 ### Patch Changes

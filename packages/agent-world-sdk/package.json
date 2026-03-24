@@ -1,6 +1,6 @@
 {
   "name": "@resciencelab/agent-world-sdk",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Reusable Agent World Network infrastructure — crypto, identity, peer DB, bootstrap, peer protocol",
   "type": "module",
   "main": "dist/index.js",
