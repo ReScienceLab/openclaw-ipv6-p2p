@@ -10,17 +10,17 @@ use tokio::sync::oneshot;
 
 use crate::crypto;
 use crate::identity::{self, Identity};
-use crate::peer_db::{Endpoint, PeerDb, PeerRecord};
+use crate::agent_db::{Endpoint, AgentDb, AgentRecord};
 
 const DEFAULT_IPC_PORT: u16 = 8199;
 
 #[derive(Clone)]
 pub struct DaemonState {
     pub identity: Identity,
-    pub peer_db: Arc<Mutex<PeerDb>>,
+    pub agent_db: Arc<Mutex<AgentDb>>,
     pub data_dir: PathBuf,
     pub gateway_url: String,
-    pub peer_port: u16,
+    pub listen_port: u16,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -28,15 +28,15 @@ pub struct StatusResponse {
     pub agent_id: String,
     pub pub_b64: String,
     pub version: String,
-    pub peer_port: u16,
+    pub listen_port: u16,
     pub gateway_url: String,
-    pub known_peers: usize,
+    pub known_agents: usize,
     pub data_dir: String,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PeersResponse {
-    pub peers: Vec<PeerRecord>,
+pub struct AgentsResponse {
+    pub agents: Vec<AgentRecord>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -58,7 +58,7 @@ pub struct WorldSummary {
 }
 
 #[derive(Deserialize)]
-pub struct PeersQuery {
+pub struct AgentsQuery {
     pub capability: Option<String>,
 }
 
@@ -88,24 +88,24 @@ impl DaemonHandle {
 pub async fn start_daemon(
     data_dir: PathBuf,
     gateway_url: String,
-    peer_port: u16,
+    listen_port: u16,
     ipc_port: u16,
 ) -> Result<DaemonHandle, DaemonError> {
     let identity = identity::load_or_create_identity(&data_dir, "identity")
         .map_err(|e| DaemonError::Identity(e.to_string()))?;
-    let peer_db = PeerDb::open(&data_dir);
+    let agent_db = AgentDb::open(&data_dir);
 
     let state = DaemonState {
         identity,
-        peer_db: Arc::new(Mutex::new(peer_db)),
+        agent_db: Arc::new(Mutex::new(agent_db)),
         data_dir,
         gateway_url,
-        peer_port,
+        listen_port,
     };
 
     let app = Router::new()
         .route("/ipc/status", get(handle_status))
-        .route("/ipc/peers", get(handle_peers))
+        .route("/ipc/agents", get(handle_agents))
         .route("/ipc/worlds", get(handle_worlds))
         .route("/ipc/ping", get(handle_ping))
         .with_state(state);
@@ -134,29 +134,29 @@ pub async fn start_daemon(
 }
 
 async fn handle_status(State(state): State<DaemonState>) -> Json<StatusResponse> {
-    let peer_count = state.peer_db.lock().unwrap().size();
+    let agent_count = state.agent_db.lock().unwrap().size();
     Json(StatusResponse {
         agent_id: state.identity.agent_id.clone(),
         pub_b64: state.identity.pub_b64.clone(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        peer_port: state.peer_port,
+        listen_port: state.listen_port,
         gateway_url: state.gateway_url.clone(),
-        known_peers: peer_count,
+        known_agents: agent_count,
         data_dir: state.data_dir.to_string_lossy().to_string(),
     })
 }
 
-async fn handle_peers(
+async fn handle_agents(
     State(state): State<DaemonState>,
-    axum::extract::Query(query): axum::extract::Query<PeersQuery>,
-) -> Json<PeersResponse> {
-    let db = state.peer_db.lock().unwrap();
-    let peers = if let Some(cap) = &query.capability {
+    axum::extract::Query(query): axum::extract::Query<AgentsQuery>,
+) -> Json<AgentsResponse> {
+    let db = state.agent_db.lock().unwrap();
+    let agents = if let Some(cap) = &query.capability {
         db.find_by_capability(cap).into_iter().cloned().collect()
     } else {
         db.list().into_iter().cloned().collect()
     };
-    Json(PeersResponse { peers })
+    Json(AgentsResponse { agents })
 }
 
 async fn handle_worlds(State(state): State<DaemonState>) -> Json<WorldsResponse> {
@@ -191,7 +191,7 @@ async fn handle_worlds(State(state): State<DaemonState>) -> Json<WorldsResponse>
 
     // Merge with local cache
     {
-        let db = state.peer_db.lock().unwrap();
+        let db = state.agent_db.lock().unwrap();
         let local_worlds = db.find_by_capability("world:");
         for lw in local_worlds {
             if !worlds.iter().any(|w| w.agent_id == lw.agent_id) {
@@ -301,13 +301,13 @@ mod tests {
         let resp: StatusResponse = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert!(resp.agent_id.starts_with("aw:sha256:"));
         assert_eq!(resp.version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(resp.peer_port, 8099);
+        assert_eq!(resp.listen_port, 8099);
 
         handle.shutdown();
     }
 
     #[tokio::test]
-    async fn test_daemon_peers_empty() {
+    async fn test_daemon_agents_empty() {
         let tmp = TempDir::new().unwrap();
         let handle = start_daemon(
             tmp.path().to_path_buf(),
@@ -318,9 +318,9 @@ mod tests {
         .await
         .unwrap();
 
-        let url = format!("http://{}/ipc/peers", handle.addr);
-        let resp: PeersResponse = reqwest::get(&url).await.unwrap().json().await.unwrap();
-        assert!(resp.peers.is_empty());
+        let url = format!("http://{}/ipc/agents", handle.addr);
+        let resp: AgentsResponse = reqwest::get(&url).await.unwrap().json().await.unwrap();
+        assert!(resp.agents.is_empty());
 
         handle.shutdown();
     }

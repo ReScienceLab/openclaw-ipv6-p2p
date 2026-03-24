@@ -1,7 +1,7 @@
 mod crypto;
 mod daemon;
 mod identity;
-mod peer_db;
+mod agent_db;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -30,8 +30,8 @@ enum Commands {
     },
     /// Show this agent's identity, transport, and status
     Status,
-    /// List known peers
-    Peers {
+    /// List known agents
+    Agents {
         /// Filter by capability prefix (e.g. "world:")
         #[arg(long)]
         capability: Option<String>,
@@ -44,13 +44,13 @@ enum Commands {
 enum DaemonAction {
     /// Start the AWN daemon
     Start {
-        /// Data directory for identity and peer DB
+        /// Data directory for identity and agent DB
         #[arg(long)]
         data_dir: Option<PathBuf>,
         /// Gateway URL
         #[arg(long)]
         gateway_url: Option<String>,
-        /// Peer server port
+        /// Listen port for the agent server
         #[arg(long, default_value_t = 8099)]
         port: u16,
     },
@@ -124,12 +124,12 @@ async fn main() {
                             println!("{}", serde_json::to_string(&status).unwrap());
                         } else {
                             println!("=== AWN Status ===");
-                            println!("Agent ID:    {}", status.agent_id);
-                            println!("Version:     v{}", status.version);
-                            println!("Peer port:   {}", status.peer_port);
-                            println!("Gateway:     {}", status.gateway_url);
-                            println!("Known peers: {}", status.known_peers);
-                            println!("Data dir:    {}", status.data_dir);
+                            println!("Agent ID:      {}", status.agent_id);
+                            println!("Version:       v{}", status.version);
+                            println!("Listen port:   {}", status.listen_port);
+                            println!("Gateway:       {}", status.gateway_url);
+                            println!("Known agents:  {}", status.known_agents);
+                            println!("Data dir:      {}", status.data_dir);
                         }
                     }
                 }
@@ -143,34 +143,34 @@ async fn main() {
                 }
             }
         }
-        Commands::Peers { ref capability } => {
+        Commands::Agents { ref capability } => {
             let ipc = resolve_ipc_port(&cli);
-            let mut url = format!("http://127.0.0.1:{ipc}/ipc/peers");
+            let mut url = format!("http://127.0.0.1:{ipc}/ipc/agents");
             if let Some(cap) = capability {
                 url = format!("{url}?capability={}", urlencoding(cap));
             }
             match reqwest::get(&url).await {
                 Ok(resp) => {
-                    if let Ok(data) = resp.json::<daemon::PeersResponse>().await {
+                    if let Ok(data) = resp.json::<daemon::AgentsResponse>().await {
                         if cli.json {
                             println!("{}", serde_json::to_string(&data).unwrap());
-                        } else if data.peers.is_empty() {
-                            println!("No peers found.");
+                        } else if data.agents.is_empty() {
+                            println!("No agents found.");
                         } else {
-                            println!("=== Known Peers ({}) ===", data.peers.len());
-                            for p in &data.peers {
-                                let alias = if p.alias.is_empty() {
+                            println!("=== Known Agents ({}) ===", data.agents.len());
+                            for a in &data.agents {
+                                let alias = if a.alias.is_empty() {
                                     String::new()
                                 } else {
-                                    format!(" — {}", p.alias)
+                                    format!(" — {}", a.alias)
                                 };
-                                let caps = if p.capabilities.is_empty() {
+                                let caps = if a.capabilities.is_empty() {
                                     String::new()
                                 } else {
-                                    format!(" [{}]", p.capabilities.join(", "))
+                                    format!(" [{}]", a.capabilities.join(", "))
                                 };
-                                let ago = (now_ms().saturating_sub(p.last_seen)) / 1000;
-                                println!("  {}{}{} — {}s ago", p.agent_id, alias, caps, ago);
+                                let ago = (now_ms().saturating_sub(a.last_seen)) / 1000;
+                                println!("  {}{}{} — {}s ago", a.agent_id, alias, caps, ago);
                             }
                         }
                     }
