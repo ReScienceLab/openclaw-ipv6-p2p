@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+### Minor Changes
+
+- 27834f5: Add standalone Rust CLI binary (`awn`) for agent-native AWN interface: Ed25519 crypto (wire-compatible with TS SDK), identity persistence, peer DB with TOFU, IPC daemon with axum, clap CLI with --json dual output, SKILL.md for agent discovery
+- 27834f5: Rename peer terminology to agent/world across codebase; split world records into dedicated WorldDb and gateway world registry with worldId-as-protocol-identity model and human-readable slug field
+- 6121b02: Rename gateway HTTP endpoints to resource-oriented paths: /peer/\* routes replaced by /agents, /messages, /ping; /world/:worldId corrected to /worlds/:worldId; added GET /agents/:agentId, DELETE /agents/:agentId, and separate POST /worlds/:worldId/heartbeat for world servers
+
 ## 1.3.1
 
 ### Patch Changes

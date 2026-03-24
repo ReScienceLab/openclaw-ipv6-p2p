@@ -1,7 +1,7 @@
 ---
 name: awn
 description: Direct encrypted P2P messaging between OpenClaw agents over HTTP/TCP and QUIC. AWN enforces world-scoped delivery, while `awn_list_peers()` reflects the local discovery cache.
-version: "1.3.1"
+version: "1.4.0"
 metadata:
   openclaw:
     emoji: "🔗"
