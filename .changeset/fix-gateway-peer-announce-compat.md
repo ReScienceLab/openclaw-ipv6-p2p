@@ -1,5 +1,5 @@
 ---
-"@resciencelab/agent-world-sdk": patch
+"@resciencelab/agent-world-network": patch
 ---
 
 fix(gateway): add /peer/announce backward-compat route and auto-redeploy on SDK version bump
