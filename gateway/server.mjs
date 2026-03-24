@@ -62,7 +62,7 @@ const DEFAULT_HTTP_PORT = parseInt(process.env.HTTP_PORT ?? "8100")
 const DEFAULT_PUBLIC_ADDR = process.env.PUBLIC_ADDR ?? null
 const DEFAULT_PUBLIC_URL = process.env.PUBLIC_URL ?? null
 const DEFAULT_DATA_DIR = process.env.DATA_DIR ?? "/data"
-const DEFAULT_STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(90 * 1000))
+const DEFAULT_STALE_TTL_MS = parseInt(process.env.STALE_TTL_MS ?? String(15 * 60 * 1000))
 const WEBHOOK_URL = process.env.WEBHOOK_URL ?? null
 const MAX_AGENTS = 500
 const REGISTRY_VERSION = 1
@@ -809,6 +809,66 @@ export async function createGatewayApp(opts = {}) {
         });
       }
       return { ok: true, agents: getAgentsForExchange(20) };
+    });
+
+    // Backward-compat: SDK versions < 1.4 post to /peer/announce instead of /agents.
+    // Accepts the same body, registers the same way, but returns the old {peers:[]} shape.
+    peer.post("/peer/announce", {
+      schema: {
+        summary: "Legacy peer announce (SDK < 1.4, maps to POST /agents)",
+        operationId: "postPeerAnnounce",
+        tags: ["gateway"],
+        body: { $ref: "AnnounceRequest#" },
+        response: {
+          200: {
+            type: "object",
+            properties: { peers: { type: "array", items: { $ref: "AgentRecord#" } } },
+          },
+          400: { $ref: "Error#" },
+          403: { $ref: "Error#" },
+        },
+      },
+    }, async (req, reply) => {
+      const ann = req.body;
+      if (!ann?.publicKey || !ann?.from) return reply.code(400).send({ error: "Invalid announce" });
+
+      const awSig = req.headers["x-agentworld-signature"];
+      if (awSig) {
+        const authority = req.headers["host"] ?? "localhost";
+        const result = verifyHttpRequestHeaders(req.headers, req.method, req.url, authority, req.rawBody, ann.publicKey);
+        if (!result.ok) return reply.code(403).send({ error: result.error });
+      } else {
+        const { signature, ...signable } = ann;
+        const domainOk = verifyWithDomainSeparator(DOMAIN_SEPARATORS.ANNOUNCE, ann.publicKey, signable, signature);
+        if (!domainOk && !verifySignature(ann.publicKey, signable, signature)) {
+          return reply.code(403).send({ error: "Invalid signature" });
+        }
+      }
+
+      if (agentIdFromPublicKey(ann.publicKey) !== ann.from) {
+        return reply.code(400).send({ error: "agentId mismatch" });
+      }
+
+      const worldCap = Array.isArray(ann.capabilities)
+        ? ann.capabilities.find((cap) => typeof cap === "string" && cap.startsWith("world:"))
+        : undefined;
+      if (worldCap) {
+        const protocolWorldId = agentIdFromPublicKey(ann.publicKey);
+        upsertWorld(protocolWorldId, ann.publicKey, {
+          slug: typeof ann.slug === "string" && ann.slug.length > 0
+            ? ann.slug
+            : worldCap.slice("world:".length) || ann.alias || protocolWorldId,
+          endpoints: ann.endpoints,
+          lastSeen: ann.timestamp,
+          persist: true,
+        });
+      } else {
+        upsertAgent(ann.from, ann.publicKey, {
+          alias: ann.alias, endpoints: ann.endpoints, capabilities: ann.capabilities, persist: true,
+        });
+      }
+      // Return legacy shape: {peers:[...]} instead of {ok, agents:[...]}
+      return { peers: getAgentsForExchange(20) };
     });
 
     peer.post("/agents/:agentId/heartbeat", {
