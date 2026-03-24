@@ -61,6 +61,8 @@ enum DaemonAction {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let json_output = cli.json;
+    let cli_ipc_port = cli.ipc_port;
 
     match cli.command {
         Commands::Daemon { action } => match action {
@@ -71,12 +73,13 @@ async fn main() {
             } => {
                 let data_dir = data_dir.unwrap_or_else(daemon::default_data_dir);
                 let gateway_url = gateway_url.unwrap_or_else(daemon::default_gateway_url);
-                let ipc_port = cli.ipc_port.unwrap_or_else(|| daemon::ipc_port());
+                let ipc_port = cli_ipc_port.unwrap_or_else(|| daemon::ipc_port());
 
                 match daemon::start_daemon(data_dir.clone(), gateway_url, port, ipc_port).await {
                     Ok(handle) => {
                         daemon::write_port_file(&data_dir, handle.addr.port());
-                        if cli.json {
+                        daemon::write_pid_file(&data_dir);
+                        if json_output {
                             println!(
                                 "{}",
                                 serde_json::json!({
@@ -90,13 +93,14 @@ async fn main() {
                         }
                         tokio::signal::ctrl_c().await.ok();
                         daemon::remove_port_file(&data_dir);
+                        daemon::remove_pid_file(&data_dir);
                         handle.shutdown();
-                        if !cli.json {
+                        if !json_output {
                             eprintln!("Daemon stopped");
                         }
                     }
                     Err(e) => {
-                        if cli.json {
+                        if json_output {
                             println!("{}", serde_json::json!({"error": e.to_string()}));
                         } else {
                             eprintln!("Error: {e}");
@@ -106,21 +110,53 @@ async fn main() {
                 }
             }
             DaemonAction::Stop => {
-                if cli.json {
-                    println!("{}", serde_json::json!({"error": "daemon stop not yet implemented (use Ctrl+C)"}));
-                } else {
-                    eprintln!("Error: daemon stop not yet implemented. Use Ctrl+C to stop the daemon, or kill the process.");
+                let data_dir = daemon::default_data_dir();
+                let ipc = resolve_ipc_port_raw(cli_ipc_port);
+                let url = format!("http://127.0.0.1:{ipc}/ipc/shutdown");
+                let client = reqwest::Client::new();
+                match client.post(&url).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        daemon::remove_port_file(&data_dir);
+                        daemon::remove_pid_file(&data_dir);
+                        if json_output {
+                            println!("{}", serde_json::json!({"ok": true, "message": "daemon stopped"}));
+                        } else {
+                            println!("Daemon stopped.");
+                        }
+                    }
+                    _ => {
+                        // Fallback: try to kill by PID
+                        if let Some(pid) = daemon::read_pid_file(&data_dir) {
+                            unsafe {
+                                if libc::kill(pid as i32, libc::SIGTERM) == 0 {
+                                    daemon::remove_port_file(&data_dir);
+                                    daemon::remove_pid_file(&data_dir);
+                                    if json_output {
+                                        println!("{}", serde_json::json!({"ok": true, "message": format!("sent SIGTERM to pid {pid}")}));
+                                    } else {
+                                        println!("Sent SIGTERM to daemon (pid {pid}).");
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+                        if json_output {
+                            println!("{}", serde_json::json!({"error": "daemon not running"}));
+                        } else {
+                            eprintln!("Daemon not running.");
+                        }
+                        std::process::exit(1);
+                    }
                 }
-                std::process::exit(1);
             }
         },
         Commands::Status => {
-            let ipc = resolve_ipc_port(&cli);
+            let ipc = resolve_ipc_port_raw(cli_ipc_port);
             let url = format!("http://127.0.0.1:{ipc}/ipc/status");
             match reqwest::get(&url).await {
                 Ok(resp) => {
                     if let Ok(status) = resp.json::<daemon::StatusResponse>().await {
-                        if cli.json {
+                        if json_output {
                             println!("{}", serde_json::to_string(&status).unwrap());
                         } else {
                             println!("=== AWN Status ===");
@@ -134,7 +170,7 @@ async fn main() {
                     }
                 }
                 Err(_) => {
-                    if cli.json {
+                    if json_output {
                         println!("{}", serde_json::json!({"error": "AWN daemon not running. Start with: awn daemon start"}));
                     } else {
                         eprintln!("AWN daemon not running. Start with: awn daemon start");
@@ -144,7 +180,7 @@ async fn main() {
             }
         }
         Commands::Agents { ref capability } => {
-            let ipc = resolve_ipc_port(&cli);
+            let ipc = resolve_ipc_port_raw(cli_ipc_port);
             let mut url = format!("http://127.0.0.1:{ipc}/ipc/agents");
             if let Some(cap) = capability {
                 url = format!("{url}?capability={}", urlencoding(cap));
@@ -152,7 +188,7 @@ async fn main() {
             match reqwest::get(&url).await {
                 Ok(resp) => {
                     if let Ok(data) = resp.json::<daemon::AgentsResponse>().await {
-                        if cli.json {
+                        if json_output {
                             println!("{}", serde_json::to_string(&data).unwrap());
                         } else if data.agents.is_empty() {
                             println!("No agents found.");
@@ -176,7 +212,7 @@ async fn main() {
                     }
                 }
                 Err(_) => {
-                    if cli.json {
+                    if json_output {
                         println!("{}", serde_json::json!({"error": "AWN daemon not running. Start with: awn daemon start"}));
                     } else {
                         eprintln!("AWN daemon not running. Start with: awn daemon start");
@@ -186,12 +222,12 @@ async fn main() {
             }
         }
         Commands::Worlds => {
-            let ipc = resolve_ipc_port(&cli);
+            let ipc = resolve_ipc_port_raw(cli_ipc_port);
             let url = format!("http://127.0.0.1:{ipc}/ipc/worlds");
             match reqwest::get(&url).await {
                 Ok(resp) => {
                     if let Ok(data) = resp.json::<daemon::WorldsResponse>().await {
-                        if cli.json {
+                        if json_output {
                             println!("{}", serde_json::to_string(&data).unwrap());
                         } else if data.worlds.is_empty() {
                             println!("No worlds found.");
@@ -206,7 +242,7 @@ async fn main() {
                     }
                 }
                 Err(_) => {
-                    if cli.json {
+                    if json_output {
                         println!("{}", serde_json::json!({"error": "AWN daemon not running. Start with: awn daemon start"}));
                     } else {
                         eprintln!("AWN daemon not running. Start with: awn daemon start");
@@ -218,8 +254,8 @@ async fn main() {
     }
 }
 
-fn resolve_ipc_port(cli: &Cli) -> u16 {
-    if let Some(port) = cli.ipc_port {
+fn resolve_ipc_port_raw(cli_ipc_port: Option<u16>) -> u16 {
+    if let Some(port) = cli_ipc_port {
         return port;
     }
     if let Ok(port) = std::env::var("AWN_IPC_PORT").and_then(|s| s.parse().map_err(|_| std::env::VarError::NotPresent)) {

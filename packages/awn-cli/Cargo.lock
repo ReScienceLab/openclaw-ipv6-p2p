@@ -115,6 +115,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek",
  "hex",
+ "libc",
  "predicates",
  "rand",
  "reqwest",

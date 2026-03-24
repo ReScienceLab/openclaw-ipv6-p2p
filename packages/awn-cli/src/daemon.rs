@@ -13,6 +13,8 @@ use crate::identity::{self, Identity};
 use crate::agent_db::{Endpoint, AgentDb, AgentRecord};
 
 const DEFAULT_IPC_PORT: u16 = 8199;
+const PORT_FILE: &str = "daemon.port";
+const PID_FILE: &str = "daemon.pid";
 
 #[derive(Clone)]
 pub struct DaemonState {
@@ -103,11 +105,32 @@ pub async fn start_daemon(
         listen_port,
     };
 
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let (ipc_shutdown_tx, ipc_shutdown_rx) = oneshot::channel::<()>();
+
     let app = Router::new()
         .route("/ipc/status", get(handle_status))
         .route("/ipc/agents", get(handle_agents))
         .route("/ipc/worlds", get(handle_worlds))
         .route("/ipc/ping", get(handle_ping))
+        .route(
+            "/ipc/shutdown",
+            post({
+                let tx = Arc::new(std::sync::Mutex::new(Some(ipc_shutdown_tx)));
+                move || {
+                    let tx = tx.clone();
+                    async move {
+                        if let Some(tx) = tx.lock().unwrap().take() {
+                            let _ = tx.send(());
+                        }
+                        Json(OkResponse {
+                            ok: true,
+                            message: Some("shutting down".to_string()),
+                        })
+                    }
+                }
+            }),
+        )
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], ipc_port));
@@ -116,12 +139,13 @@ pub async fn start_daemon(
         .map_err(|e| DaemonError::Bind(e.to_string()))?;
     let bound_addr = listener.local_addr().unwrap();
 
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-
     tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
-                let _ = shutdown_rx.await;
+                tokio::select! {
+                    _ = shutdown_rx => {}
+                    _ = ipc_shutdown_rx => {}
+                }
             })
             .await
             .ok();
@@ -236,8 +260,6 @@ pub fn default_gateway_url() -> String {
     std::env::var("GATEWAY_URL").unwrap_or_else(|_| "https://gateway.agentworlds.ai".to_string())
 }
 
-const PORT_FILE: &str = "daemon.port";
-
 pub fn write_port_file(data_dir: &std::path::Path, port: u16) {
     let _ = std::fs::create_dir_all(data_dir);
     let _ = std::fs::write(data_dir.join(PORT_FILE), port.to_string());
@@ -251,6 +273,21 @@ pub fn read_port_file(data_dir: &std::path::Path) -> Option<u16> {
 
 pub fn remove_port_file(data_dir: &std::path::Path) {
     let _ = std::fs::remove_file(data_dir.join(PORT_FILE));
+}
+
+pub fn write_pid_file(data_dir: &std::path::Path) {
+    let _ = std::fs::create_dir_all(data_dir);
+    let _ = std::fs::write(data_dir.join(PID_FILE), std::process::id().to_string());
+}
+
+pub fn read_pid_file(data_dir: &std::path::Path) -> Option<u32> {
+    std::fs::read_to_string(data_dir.join(PID_FILE))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
+pub fn remove_pid_file(data_dir: &std::path::Path) {
+    let _ = std::fs::remove_file(data_dir.join(PID_FILE));
 }
 
 #[derive(Debug, thiserror::Error)]

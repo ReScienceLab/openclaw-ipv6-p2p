@@ -25,6 +25,7 @@ dirs = "6"
 tracing = "0.1"
 thiserror = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+libc = "0.2"
 
 [package.metadata.deb]
 maintainer = "ReScienceLab <resciencelab@users.noreply.github.com>"
