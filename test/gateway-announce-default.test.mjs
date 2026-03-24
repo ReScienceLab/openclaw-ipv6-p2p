@@ -65,7 +65,7 @@ test("startGatewayAnnounce defaults to the local gateway HTTP port", async () =>
 
     startupTimers[0]()
     assert.equal(fetchCalls.length, 1)
-    assert.equal(fetchCalls[0].url, "http://localhost:8100/peer/announce")
+    assert.equal(fetchCalls[0].url, "http://localhost:8100/agents")
 
     stop()
   } finally {

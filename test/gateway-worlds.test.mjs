@@ -78,8 +78,8 @@ describe("Gateway GET /worlds", () => {
     const paths = Object.keys(spec.paths).sort()
     assert.ok(paths.includes("/worlds"), "must include /worlds")
     assert.ok(paths.includes("/health"), "must include /health")
-    assert.ok(paths.includes("/peer/announce"), "must include /peer/announce")
-    assert.ok(paths.includes("/peer/heartbeat"), "must include /peer/heartbeat")
+    assert.ok(paths.includes("/agents"), "must include /agents")
+    assert.ok(paths.includes("/messages"), "must include /messages")
 
     const schemas = Object.keys(spec.components?.schemas ?? {}).sort()
     assert.ok(schemas.includes("WorldSummary"), "must include WorldSummary schema")
@@ -87,9 +87,8 @@ describe("Gateway GET /worlds", () => {
     assert.ok(schemas.includes("PeerRecord"), "must include PeerRecord schema")
 
     for (const [route, schemaName] of [
-      ["/peer/announce", "AnnounceRequest"],
-      ["/peer/heartbeat", "HeartbeatRequest"],
-      ["/peer/message", "SignedMessage"],
+      ["/agents", "AnnounceRequest"],
+      ["/messages", "SignedMessage"],
     ]) {
       const post = spec.paths[route]?.post
       assert.ok(post, `${route} POST must exist`)

@@ -336,7 +336,7 @@ describe("plugin lifecycle", () => {
             }),
           }
         }
-        if (requestUrl.endsWith("/world/arena")) {
+        if (requestUrl.endsWith("/worlds/arena")) {
           return {
             ok: true,
             status: 200,
@@ -371,7 +371,7 @@ describe("plugin lifecycle", () => {
 
       const joinCall = harness.sendCalls.find((call) => call.event === "world.join")
       assert.equal(joinCall?.targetAddr, "203.0.113.10")
-      assert.ok(harness.fetchCalls.some(([requestUrl]) => String(requestUrl).endsWith("/world/arena")))
+      assert.ok(harness.fetchCalls.some(([requestUrl]) => String(requestUrl).endsWith("/worlds/arena")))
 
       const worldPeer = harness.peers.get(worldAgentId)
       assert.ok(worldPeer)
