@@ -5,8 +5,8 @@ import Fastify from "fastify"
 const nacl = (await import("tweetnacl")).default
 
 const {
-  registerPeerRoutes,
-  PeerDb,
+  registerAgentRoutes,
+  AgentDb,
   PROTOCOL_VERSION,
   agentIdFromPublicKey,
   signWithDomainSeparator,
@@ -63,14 +63,14 @@ function makeApp(t, opts = {}) {
     await fastify.close()
   })
 
-  const peerDb = new PeerDb()
-  registerPeerRoutes(fastify, {
+  const agentDb = new AgentDb()
+  registerAgentRoutes(fastify, {
     identity: makeIdentity(),
-    peerDb,
+    agentDb,
     ...opts,
   })
 
-  return { fastify, peerDb }
+  return { fastify, agentDb }
 }
 
 test("sdk /peer/key-rotation rejects mismatched newAgentId binding with stable 400 error", async (t) => {
@@ -121,7 +121,7 @@ test("sdk /peer/key-rotation rejects mismatched newAgentId binding with stable 4
 })
 
 test("sdk /peer/key-rotation accepts correctly bound rotations and persists the new key", async (t) => {
-  const { fastify, peerDb } = makeApp(t)
+  const { fastify, agentDb } = makeApp(t)
 
   const oldKey = makeIdentity()
   const newKey = makeIdentity()
@@ -162,12 +162,12 @@ test("sdk /peer/key-rotation accepts correctly bound rotations and persists the 
 
   assert.equal(response.statusCode, 200)
   assert.deepEqual(response.json(), { ok: true })
-  assert.equal(peerDb.get(oldKey.agentId)?.publicKey, newKey.pubB64)
+  assert.equal(agentDb.get(oldKey.agentId)?.publicKey, newKey.pubB64)
 })
 
 test("sdk /peer/message returns the callback response body on the happy path", async (t) => {
   const sender = makeIdentity()
-  const { fastify, peerDb } = makeApp(t, {
+  const { fastify, agentDb } = makeApp(t, {
     onMessage: async (_agentId, event, content, reply) => {
       reply({
         ok: true,
@@ -190,7 +190,7 @@ test("sdk /peer/message returns the callback response body on the happy path", a
     event: "chat",
     echoedContent: { text: "hello" },
   })
-  assert.equal(peerDb.get(sender.agentId)?.publicKey, sender.pubB64)
+  assert.equal(agentDb.get(sender.agentId)?.publicKey, sender.pubB64)
 })
 
 test("sdk /peer/message preserves callback error replies", async (t) => {

@@ -5,7 +5,7 @@ import {
   signWithDomainSeparator,
 } from "./crypto.js";
 import type { Identity } from "./types.js";
-import type { PeerDb } from "./peer-db.js";
+import type { AgentDb } from "./agent-db.js";
 
 const DEFAULT_GATEWAY_URL = "http://localhost:8100";
 
@@ -16,7 +16,7 @@ export interface AnnounceOpts {
   publicAddr: string | null;
   publicPort: number;
   capabilities: string[];
-  peerDb: PeerDb;
+  agentDb: AgentDb;
 }
 
 export async function announceToGateway(
@@ -30,7 +30,7 @@ export async function announceToGateway(
     publicAddr,
     publicPort,
     capabilities,
-    peerDb,
+    agentDb,
   } = opts;
 
   const url = `${gatewayUrl.replace(/\/+$/, "")}/agents`;
@@ -80,7 +80,7 @@ export async function announceToGateway(
     });
     if (!resp.ok) return;
     const data = (await resp.json()) as {
-      peers?: Array<{
+      agents?: Array<{
         agentId: string;
         publicKey: string;
         alias: string;
@@ -89,13 +89,13 @@ export async function announceToGateway(
         lastSeen: number;
       }>;
     };
-    for (const peer of data.peers ?? []) {
-      if (peer.agentId && peer.agentId !== identity.agentId) {
-        peerDb.upsert(peer.agentId, peer.publicKey, {
-          alias: peer.alias,
-          endpoints: peer.endpoints,
-          capabilities: peer.capabilities,
-          lastSeen: peer.lastSeen,
+    for (const agent of data.agents ?? []) {
+      if (agent.agentId && agent.agentId !== identity.agentId) {
+        agentDb.upsert(agent.agentId, agent.publicKey, {
+          alias: agent.alias,
+          endpoints: agent.endpoints,
+          capabilities: agent.capabilities,
+          lastSeen: agent.lastSeen,
         });
       }
     }
@@ -177,7 +177,7 @@ export async function startGatewayAnnounce(opts: GatewayAnnounceOpts): Promise<(
     await Promise.allSettled(
       urls.map((u) => announceToGateway(u, opts))
     );
-    onDiscovery?.(opts.peerDb.size);
+    onDiscovery?.(opts.agentDb.size);
   }
 
   const worldCap = opts.capabilities.find((c) => c.startsWith("world:"));

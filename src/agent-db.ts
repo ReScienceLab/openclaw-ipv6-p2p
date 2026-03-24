@@ -1,19 +1,19 @@
 /**
- * Local peer store with TOFU (Trust On First Use) logic.
+ * Local agent store with TOFU (Trust On First Use) logic.
  * Keyed by agentId.
  */
 import * as fs from "fs"
 import * as path from "path"
-import { DiscoveredPeerRecord, Endpoint } from "./types"
+import { DiscoveredAgentRecord, Endpoint } from "./types"
 import { agentIdFromPublicKey } from "./identity"
 
-interface PeerStore {
+interface AgentStore {
   version: number
-  peers: Record<string, DiscoveredPeerRecord>
+  agents: Record<string, DiscoveredAgentRecord>
 }
 
 let dbPath: string
-let store: PeerStore = { version: 2, peers: {} }
+let store: AgentStore = { version: 3, agents: {} }
 let _saveTimer: ReturnType<typeof setTimeout> | null = null
 const SAVE_DEBOUNCE_MS = 1000
 
@@ -21,9 +21,9 @@ function load(): void {
   if (fs.existsSync(dbPath)) {
     try {
       const raw = JSON.parse(fs.readFileSync(dbPath, "utf-8"))
-      const migrated: Record<string, DiscoveredPeerRecord> = {}
-      for (const [storedId, record] of Object.entries(raw.peers ?? {})) {
-        const r = record as DiscoveredPeerRecord
+      const migrated: Record<string, DiscoveredAgentRecord> = {}
+      for (const [storedId, record] of Object.entries(raw.agents ?? raw.peers ?? {})) {
+        const r = record as DiscoveredAgentRecord
         // Migrate legacy 32-char truncated agentIds → aw:sha256:<64hex>
         if (/^[0-9a-f]{32}$/.test(storedId) && r.publicKey) {
           const newId = agentIdFromPublicKey(r.publicKey)
@@ -32,12 +32,12 @@ function load(): void {
           migrated[storedId] = r
         }
       }
-      store = { version: 2, peers: migrated }
+      store = { version: 3, agents: migrated }
     } catch {
-      store = { version: 2, peers: {} }
+      store = { version: 3, agents: {} }
     }
   } else {
-    store = { version: 2, peers: {} }
+    store = { version: 3, agents: {} }
   }
 }
 
@@ -62,22 +62,22 @@ export function flushDb(): void {
 }
 
 export function initDb(dataDir: string): void {
-  dbPath = path.join(dataDir, "peers.json")
+  dbPath = path.join(dataDir, "agents.json")
   load()
 }
 
-export function listPeers(): DiscoveredPeerRecord[] {
-  return Object.values(store.peers).sort((a, b) => b.lastSeen - a.lastSeen)
+export function listAgents(): DiscoveredAgentRecord[] {
+  return Object.values(store.agents).sort((a, b) => b.lastSeen - a.lastSeen)
 }
 
-export function upsertPeer(agentId: string, alias: string = ""): void {
+export function upsertAgent(agentId: string, alias: string = ""): void {
   const now = Date.now()
-  const existing = store.peers[agentId]
+  const existing = store.agents[agentId]
   if (existing) {
     existing.alias = alias || existing.alias
     existing.lastSeen = now
   } else {
-    store.peers[agentId] = {
+    store.agents[agentId] = {
       agentId,
       publicKey: "",
       alias,
@@ -91,7 +91,7 @@ export function upsertPeer(agentId: string, alias: string = ""): void {
   saveImmediate()
 }
 
-export function upsertDiscoveredPeer(
+export function upsertDiscoveredAgent(
   agentId: string,
   publicKey: string,
   opts: {
@@ -105,7 +105,7 @@ export function upsertDiscoveredPeer(
   } = {}
 ): void {
   const now = Date.now()
-  const existing = store.peers[agentId]
+  const existing = store.agents[agentId]
   if (existing) {
     if (!existing.publicKey) existing.publicKey = publicKey
     if (opts.lastSeen !== undefined) {
@@ -119,7 +119,7 @@ export function upsertDiscoveredPeer(
     if (opts.capabilities?.length) existing.capabilities = opts.capabilities
     if (opts.alias && existing.source !== "manual") existing.alias = opts.alias
   } else {
-    store.peers[agentId] = {
+    store.agents[agentId] = {
       agentId,
       publicKey,
       alias: opts.alias ?? "",
@@ -135,39 +135,39 @@ export function upsertDiscoveredPeer(
   save()
 }
 
-export function getPeersForExchange(max: number = 20): DiscoveredPeerRecord[] {
-  return Object.values(store.peers)
+export function getAgentsForExchange(max: number = 20): DiscoveredAgentRecord[] {
+  return Object.values(store.agents)
     .filter((p) => p.publicKey)
     .sort((a, b) => b.lastSeen - a.lastSeen)
     .slice(0, max)
 }
 
-export function removePeer(agentId: string): void {
-  delete store.peers[agentId]
+export function removeAgent(agentId: string): void {
+  delete store.agents[agentId]
   saveImmediate()
 }
 
-export function getPeer(agentId: string): DiscoveredPeerRecord | null {
-  return store.peers[agentId] ?? null
+export function getAgent(agentId: string): DiscoveredAgentRecord | null {
+  return store.agents[agentId] ?? null
 }
 
-export function getPeerIds(): string[] {
-  return Object.keys(store.peers)
+export function getAgentIds(): string[] {
+  return Object.keys(store.agents)
 }
 
 export function pruneStale(maxAgeMs: number, protectedIds: string[] = []): number {
   const cutoff = Date.now() - maxAgeMs
   let pruned = 0
-  for (const [id, record] of Object.entries(store.peers)) {
+  for (const [id, record] of Object.entries(store.agents)) {
     if (record.source === "manual") continue
     if (protectedIds.includes(id)) continue
     if (record.lastSeen < cutoff) {
-      delete store.peers[id]
+      delete store.agents[id]
       pruned++
     }
   }
   if (pruned > 0) {
-    console.log(`[p2p:db] Pruned ${pruned} stale peer(s)`)
+    console.log(`[awn:db] Pruned ${pruned} stale agent(s)`)
     saveImmediate()
   }
   return pruned
@@ -183,10 +183,10 @@ export function setTofuTtl(days: number): void {
 
 export function tofuVerifyAndCache(agentId: string, publicKey: string): boolean {
   const now = Date.now()
-  const existing = store.peers[agentId]
+  const existing = store.agents[agentId]
 
   if (!existing) {
-    store.peers[agentId] = {
+    store.agents[agentId] = {
       agentId,
       publicKey,
       alias: "",
@@ -211,7 +211,7 @@ export function tofuVerifyAndCache(agentId: string, publicKey: string): boolean 
 
   // TTL check: if binding has expired, accept new key as fresh TOFU
   if (existing.tofuCachedAt && now - existing.tofuCachedAt > _tofuTtlMs) {
-    console.log(`[p2p:db] TOFU TTL expired for ${agentId} — accepting new key`)
+    console.log(`[awn:db] TOFU TTL expired for ${agentId} — accepting new key`)
     existing.publicKey = publicKey
     existing.tofuCachedAt = now
     existing.lastSeen = now
@@ -231,13 +231,13 @@ export function tofuVerifyAndCache(agentId: string, publicKey: string): boolean 
 
 export function tofuReplaceKey(agentId: string, newPublicKey: string): void {
   const now = Date.now()
-  const existing = store.peers[agentId]
+  const existing = store.agents[agentId]
   if (existing) {
     existing.publicKey = newPublicKey
     existing.tofuCachedAt = now
     existing.lastSeen = now
   } else {
-    store.peers[agentId] = {
+    store.agents[agentId] = {
       agentId,
       publicKey: newPublicKey,
       alias: "",
@@ -252,23 +252,23 @@ export function tofuReplaceKey(agentId: string, newPublicKey: string): void {
   saveImmediate()
 }
 
-/** Extract a reachable address from a peer's endpoints for a given transport. */
-export function getEndpointAddress(peer: DiscoveredPeerRecord, transport: string): string | null {
-  const ep = peer.endpoints
+/** Extract a reachable address from an agent's endpoints for a given transport. */
+export function getEndpointAddress(agent: DiscoveredAgentRecord, transport: string): string | null {
+  const ep = agent.endpoints
     ?.filter((e) => e.transport === transport)
     .sort((a, b) => a.priority - b.priority)[0]
   return ep?.address ?? null
 }
 
 /**
- * Find peers that have a matching capability.
+ * Find agents that have a matching capability.
  * - Prefix match (cap ends with ":"): "world:" matches "world:pixel-city", "world:dungeon", etc.
  * - Exact match (cap has no trailing ":"): "world:pixel-city" matches only "world:pixel-city".
- * Returns peers sorted by lastSeen descending.
+ * Returns agents sorted by lastSeen descending.
  */
-export function findPeersByCapability(cap: string): DiscoveredPeerRecord[] {
+export function findAgentsByCapability(cap: string): DiscoveredAgentRecord[] {
   const isPrefix = cap.endsWith(":")
-  return Object.values(store.peers)
+  return Object.values(store.agents)
     .filter((p) => p.capabilities?.some((c) => isPrefix ? c.startsWith(cap) : c === cap))
     .sort((a, b) => b.lastSeen - a.lastSeen)
 }

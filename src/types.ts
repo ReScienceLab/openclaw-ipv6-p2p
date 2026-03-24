@@ -29,7 +29,7 @@ export interface P2PMessage {
   signature: string     // Ed25519 sig over canonical JSON (all fields except signature)
 }
 
-export interface PeerAnnouncement {
+export interface AgentAnnouncement {
   from: string
   publicKey: string
   alias?: string
@@ -38,7 +38,7 @@ export interface PeerAnnouncement {
   capabilities?: string[]
   timestamp: number
   signature: string
-  peers: Array<{
+  agents: Array<{
     agentId: string
     publicKey: string
     alias?: string
@@ -47,9 +47,9 @@ export interface PeerAnnouncement {
   }>
 }
 
-// ── Peer record types ───────────────────────────────────────────────────────
+// ── Agent record types ──────────────────────────────────────────────────────
 
-export interface PeerRecord {
+export interface AgentRecord {
   agentId: string
   publicKey: string
   alias: string
@@ -59,7 +59,7 @@ export interface PeerRecord {
   lastSeen: number
 }
 
-export interface DiscoveredPeerRecord extends PeerRecord {
+export interface DiscoveredAgentRecord extends AgentRecord {
   tofuCachedAt?: number   // timestamp when TOFU binding was first established
   discoveredVia?: string
   source: "manual" | "bootstrap" | "gossip" | "gateway"

@@ -18,12 +18,12 @@ import * as path from "node:path"
 const nacl = (await import("tweetnacl")).default
 
 const {
-  startPeerServer, stopPeerServer,
+  startAgentServer, stopAgentServer,
   addWorldMembers, removeWorld, isCoMember, clearWorldMembers,
   handleUdpMessage,
   onMessage,
-} = await import("../dist/peer-server.js")
-const { initDb, flushDb } = await import("../dist/peer-db.js")
+} = await import("../dist/agent-server.js")
+const { initDb, flushDb } = await import("../dist/agent-db.js")
 const { agentIdFromPublicKey, signHttpRequest, signWithDomainSeparator, DOMAIN_SEPARATORS, canonicalize } = await import("../dist/identity.js")
 
 const PORT = 18125
@@ -67,13 +67,13 @@ describe("Transport enforcement — world-scoped isolation", () => {
     selfKey = makeIdentity()
     memberKey = makeIdentity()
     strangerKey = makeIdentity()
-    await startPeerServer(PORT, { identity: selfKey, testMode: true })
+    await startAgentServer(PORT, { identity: selfKey, testMode: true })
     addWorldMembers("test-world", [memberKey.agentId])
   })
 
   after(async () => {
     clearWorldMembers()
-    await stopPeerServer()
+    await stopAgentServer()
     flushDb()
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })

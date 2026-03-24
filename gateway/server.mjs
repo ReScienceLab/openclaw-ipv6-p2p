@@ -98,7 +98,7 @@ export async function createGatewayApp(opts = {}) {
   // Registry
   // ---------------------------------------------------------------------------
 
-  const registry = new Map() // agentId -> PeerRecord
+  const registry = new Map() // agentId -> AgentRecord
   let _saveTimer = null
   let _tickTimer = null
   let _shutdownPromise = null
@@ -449,7 +449,7 @@ export async function createGatewayApp(opts = {}) {
         200: {
           type: "object",
           required: ["agents"],
-          properties: { agents: { type: "array", items: { $ref: "PeerRecord#" } } },
+          properties: { agents: { type: "array", items: { $ref: "AgentRecord#" } } },
         },
       },
     },
@@ -573,7 +573,7 @@ export async function createGatewayApp(opts = {}) {
         properties: { agentId: { type: "string" } },
       },
       response: {
-        200: { $ref: "PeerRecord#" },
+        200: { $ref: "AgentRecord#" },
         404: { $ref: "Error#" },
       },
     },
@@ -713,10 +713,10 @@ export async function createGatewayApp(opts = {}) {
         response: {
           200: {
             type: "object",
-            required: ["ok", "peers"],
+            required: ["ok", "agents"],
             properties: {
               ok: { type: "boolean" },
-              peers: { type: "array", items: { $ref: "PeerRecord#" } },
+              agents: { type: "array", items: { $ref: "AgentRecord#" } },
             },
           },
           400: { $ref: "Error#" },
@@ -746,7 +746,7 @@ export async function createGatewayApp(opts = {}) {
       upsertAgent(ann.from, ann.publicKey, {
         alias: ann.alias, endpoints: ann.endpoints, capabilities: ann.capabilities, persist: true,
       });
-      return { ok: true, peers: getAgentsForExchange(20) };
+      return { ok: true, agents: getAgentsForExchange(20) };
     });
 
     peer.post("/agents/:agentId/heartbeat", {

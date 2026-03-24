@@ -19,8 +19,8 @@ const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
 
 const nacl = (await import("tweetnacl")).default
 
-const { startPeerServer, stopPeerServer } = await import("../dist/peer-server.js")
-const { initDb } = await import("../dist/peer-db.js")
+const { startAgentServer, stopAgentServer } = await import("../dist/agent-server.js")
+const { initDb } = await import("../dist/agent-db.js")
 const { agentIdFromPublicKey, DOMAIN_SEPARATORS } = await import("../dist/identity.js")
 
 const PORT = 18110
@@ -78,11 +78,11 @@ describe("P2a — response signing on /peer/* endpoints", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "awn-rsig-"))
     initDb(tmpDir)
     selfKey = makeKeypair()
-    await startPeerServer(PORT, { testMode: true, identity: { agentId: selfKey.agentId, publicKey: selfKey.publicKey, privateKey: selfKey.privateKey } })
+    await startAgentServer(PORT, { testMode: true, identity: { agentId: selfKey.agentId, publicKey: selfKey.publicKey, privateKey: selfKey.privateKey } })
   })
 
   after(async () => {
-    await stopPeerServer()
+    await stopAgentServer()
     fs.rmSync(tmpDir, { recursive: true })
   })
 

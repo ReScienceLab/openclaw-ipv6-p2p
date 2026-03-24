@@ -1,17 +1,17 @@
 /**
  * AWN — Agent World Network — OpenClaw plugin entry point.
  *
- * Agent ID (sha256(publicKey)[:16]) is the primary peer identifier.
+ * Agent ID (sha256(publicKey)[:16]) is the primary agent identifier.
  * Transport is plain HTTP over TCP; QUIC is available as a fast optional transport.
  */
 import * as os from "os"
 import * as path from "path"
 import { execSync } from "child_process"
 import { loadOrCreateIdentity, deriveDidKey, verifyHttpResponseHeaders } from "./identity"
-import { initDb, listPeers, getPeer, flushDb, getPeerIds, getEndpointAddress, setTofuTtl, findPeersByCapability, removePeer } from "./peer-db"
-import { startPeerServer, stopPeerServer, setSelfMeta, handleUdpMessage, addWorldMembers, setWorldMembers, removeWorld, clearWorldMembers } from "./peer-server"
-import { sendP2PMessage, pingPeer, broadcastLeave, SendOptions, getPeerPingInfo } from "./peer-client"
-import { upsertDiscoveredPeer } from "./peer-db"
+import { initDb, listAgents, getAgent, flushDb, getAgentIds, getEndpointAddress, setTofuTtl, findAgentsByCapability, removeAgent } from "./agent-db"
+import { startAgentServer, stopAgentServer, setSelfMeta, handleUdpMessage, addWorldMembers, setWorldMembers, removeWorld, clearWorldMembers } from "./agent-server"
+import { sendP2PMessage, pingAgent, broadcastLeave, SendOptions, getAgentPingInfo } from "./agent-client"
+import { upsertDiscoveredAgent } from "./agent-db"
 import { buildChannel, wireInboundToGateway, CHANNEL_CONFIG_SCHEMA } from "./channel"
 import { Identity, PluginConfig, Endpoint } from "./types"
 import { TransportManager } from "./transport"
@@ -19,7 +19,7 @@ import { UDPTransport } from "./transport-quic"
 import { parseDirectPeerAddress } from "./address"
 
 const AWN_TOOLS = [
-  "awn_list_peers",
+  "awn_list_agents",
   "awn_send_message", "awn_status",
   "list_worlds", "join_world", "world_action", "world_info",
 ]
@@ -163,8 +163,8 @@ function untrackWorldScopedPeer(agentId: string, worldId: string): void {
   if (worldIds.size > 0) return
 
   _worldScopedPeerWorlds.delete(agentId)
-  if (getPeer(agentId)?.source !== "manual") {
-    removePeer(agentId)
+  if (getAgent(agentId)?.source !== "manual") {
+    removeAgent(agentId)
   }
 }
 
@@ -180,9 +180,9 @@ function syncWorldMembers(
 
     nextMemberIds.add(member.agentId)
 
-    const existingPeer = getPeer(member.agentId)
-    if (!existingPeer || existingPeer.source !== "manual") {
-      upsertDiscoveredPeer(member.agentId, "", {
+    const existingAgent = getAgent(member.agentId)
+    if (!existingAgent || existingAgent.source !== "manual") {
+      upsertDiscoveredAgent(member.agentId, "", {
         alias: member.alias,
         endpoints: member.endpoints,
         source: "gossip",
@@ -304,7 +304,7 @@ async function leaveJoinedWorlds(): Promise<void> {
 }
 
 function buildSendOpts(peerIdOrAddr?: string): SendOptions {
-  const peer = peerIdOrAddr ? getPeer(peerIdOrAddr) : null
+  const peer = peerIdOrAddr ? getAgent(peerIdOrAddr) : null
   return {
     endpoints: peer?.endpoints,
     quicTransport: _quicTransport?.isActive() ? _quicTransport : undefined,
@@ -429,7 +429,7 @@ export default function register(api: any) {
       }
       _agentMeta.endpoints = advertisedEndpoints
 
-      await startPeerServer(peerPort, { identity })
+      await startAgentServer(peerPort, { identity })
 
       setSelfMeta({
         agentId: identity.agentId,
@@ -450,7 +450,7 @@ export default function register(api: any) {
           "",
           "Quick start:",
           "  openclaw awn status     — show your agent ID",
-          "  openclaw join_world <id> — join a world to discover peers",
+          "  openclaw join_world <id> — join a world to discover agents",
         ]
         _welcomeTimer = setTimeout(() => {
           _welcomeTimer = null
@@ -465,7 +465,7 @@ export default function register(api: any) {
         }, 2000)
       }
 
-      console.log(`[awn] Ready — join a world to discover peers`)
+      console.log(`[awn] Ready — join a world to discover agents`)
     },
 
     stop: async () => {
@@ -485,10 +485,10 @@ export default function register(api: any) {
       clearWorldMembers()
       _worldRefreshFailures.clear()
       if (identity) {
-        await broadcastLeave(identity, listPeers(), peerPort, buildSendOpts())
+        await broadcastLeave(identity, listAgents(), peerPort, buildSendOpts())
       }
       flushDb()
-      await stopPeerServer()
+      await stopAgentServer()
       if (_transportManager) {
         await _transportManager.stop()
         _transportManager = null
@@ -514,9 +514,9 @@ export default function register(api: any) {
         capabilities: { chatTypes: ["direct"] },
         configSchema: CHANNEL_CONFIG_SCHEMA,
         config: {
-          listAccountIds: () => (identity ? getPeerIds() : []),
+          listAccountIds: () => (identity ? getAgentIds() : []),
           resolveAccount: (_: unknown, accountId: string | undefined) => {
-            const peer = accountId ? getPeer(accountId) : null
+            const peer = accountId ? getAgent(accountId) : null
             return {
               accountId: accountId ?? "",
               agentId: peer?.agentId ?? accountId ?? "",
@@ -558,43 +558,43 @@ export default function register(api: any) {
           if (_quicTransport?.isActive()) {
             console.log(`QUIC endpoint:  ${_quicTransport.address}`)
           }
-          console.log(`Peer port:      ${peerPort}`)
-          console.log(`Known peers:    ${listPeers().length}`)
+          console.log(`Listen port:      ${peerPort}`)
+          console.log(`Known agents:    ${listAgents().length}`)
           console.log(`Worlds joined:  ${_joinedWorlds.size}`)
         })
 
       awn
-        .command("peers")
-        .description("List known peers")
+        .command("agents")
+        .description("List known agents")
         .action(() => {
-          const peers = listPeers()
-          if (peers.length === 0) {
-            console.log("No peers yet. Use 'openclaw awn add <agent-id>' to add one.")
+          const agents = listAgents()
+          if (agents.length === 0) {
+            console.log("No agents yet. Use 'openclaw awn add <agent-id>' to add one.")
             return
           }
-          console.log("=== Known Peers ===")
-          for (const peer of peers) {
-            const ago = Math.round((Date.now() - peer.lastSeen) / 1000)
-            const label = peer.alias ? ` — ${peer.alias}` : ""
-            const ver = peer.version ? ` [v${peer.version}]` : ""
-            const transports = peer.endpoints?.map((e) => e.transport).join(",") || "none"
-            console.log(`  ${peer.agentId}${label}${ver}  [${transports}]  last seen ${ago}s ago`)
+          console.log("=== Known Agents ===")
+          for (const agent of agents) {
+            const ago = Math.round((Date.now() - agent.lastSeen) / 1000)
+            const label = agent.alias ? ` — ${agent.alias}` : ""
+            const ver = agent.version ? ` [v${agent.version}]` : ""
+            const transports = agent.endpoints?.map((e) => e.transport).join(",") || "none"
+            console.log(`  ${agent.agentId}${label}${ver}  [${transports}]  last seen ${ago}s ago`)
           }
         })
 
       awn
         .command("ping <agentId>")
-        .description("Check if a peer is reachable")
+        .description("Check if an agent is reachable")
         .action(async (agentId: string) => {
           console.log(`Pinging ${agentId}...`)
-          const peer = getPeer(agentId)
-          const ok = await pingPeer(agentId, peerPort, 5_000, peer?.endpoints)
+          const peer = getAgent(agentId)
+          const ok = await pingAgent(agentId, peerPort, 5_000, peer?.endpoints)
           console.log(ok ? `Reachable` : `Unreachable`)
         })
 
       awn
         .command("send <agentId> <message>")
-        .description("Send a direct message to a peer")
+        .description("Send a direct message to an agent")
         .action(async (agentId: string, message: string) => {
           if (!identity) {
             console.error("Plugin not started. Restart the gateway first.")
@@ -637,7 +637,7 @@ export default function register(api: any) {
     description: "Show AWN node status",
     handler: () => {
       if (!identity) return { text: "AWN: not started yet." }
-      const peers = listPeers()
+      const agents = listAgents()
       const activeTransport = _transportManager?.active
       return {
         text: [
@@ -646,7 +646,7 @@ export default function register(api: any) {
           `DID Key: \`${deriveDidKey(identity.publicKey)}\``,
           `Transport: ${activeTransport?.id ?? "http-only"}`,
           ...(_quicTransport?.isActive() ? [`QUIC: \`${_quicTransport.address}\``] : []),
-          `Peers: ${peers.length} known`,
+          `Known agents: ${agents.length}`,
           `Worlds: ${_joinedWorlds.size} joined`,
         ].join("\n"),
       }
@@ -654,24 +654,26 @@ export default function register(api: any) {
   })
 
   api.registerCommand({
-    name: "awn-peers",
-    description: "List known AWN peers",
+    name: "awn-agents",
+    description: "List known AWN agents",
     handler: () => {
-      const peers = listPeers()
-      if (peers.length === 0) return { text: "No peers yet. Use `openclaw awn add <agent-id>`." }
-      const lines = peers.map((p) => {
+      const agents = listAgents()
+      if (agents.length === 0) return { text: "No agents yet. Use `openclaw awn add <agent-id>`." }
+      const lines = agents.map((p) => {
+        const ago = Math.round((Date.now() - p.lastSeen) / 1000)
         const label = p.alias ? ` — ${p.alias}` : ""
         const ver = p.version ? ` [v${p.version}]` : ""
-        return `\`${p.agentId}\`${label}${ver}`
+        const caps = p.capabilities?.length ? ` [${p.capabilities.join(", ")}]` : ""
+        return `${p.agentId}${label}${ver}${caps} — last seen ${ago}s ago`
       })
-      return { text: `**Known Peers**\n${lines.join("\n")}` }
+      return { text: `**Known Agents**\n${lines.join("\n")}` }
     },
   })
 
   // ── Agent tools ────────────────────────────────────────────────────────────
   api.registerTool({
     name: "awn_send_message",
-    description: "Send a signed AWN message to a peer agent by their agent ID. The peer must share a joined world with this agent.",
+    description: "Send a signed AWN message to an agent by their agent ID. The agent must share a joined world with this agent.",
     parameters: {
       type: "object",
       properties: {
@@ -696,23 +698,23 @@ export default function register(api: any) {
   })
 
   api.registerTool({
-    name: "awn_list_peers",
-    description: "List AWN peers from the local discovery cache. Optionally filter by capability prefix (e.g. 'world:' or 'world:pixel-city'). Entries may appear before you join a shared world, but direct messaging still requires world co-membership.",
+    name: "awn_list_agents",
+    description: "List AWN agents from the local discovery cache. Optionally filter by capability prefix (e.g. 'world:' or 'world:pixel-city'). Entries may appear before you join a shared world, but direct messaging still requires world co-membership.",
     parameters: {
       type: "object",
       properties: {
-        capability: { type: "string", description: "Filter peers by capability prefix (e.g. 'world:')" },
+        capability: { type: "string", description: "Filter agents by capability prefix (e.g. 'world:')" },
       },
       required: [],
     },
     async execute(_id: string, params: { capability?: string }) {
-      const peers = params.capability
-        ? findPeersByCapability(params.capability)
-        : listPeers()
-      if (peers.length === 0) {
-        return { content: [{ type: "text", text: "No peers found." }] }
+      const agents = params.capability
+        ? findAgentsByCapability(params.capability)
+        : listAgents()
+      if (agents.length === 0) {
+        return { content: [{ type: "text", text: "No agents found." }] }
       }
-      const lines = peers.map((p) => {
+      const lines = agents.map((p) => {
         const ago = Math.round((Date.now() - p.lastSeen) / 1000)
         const label = p.alias ? ` — ${p.alias}` : ""
         const ver = p.version ? ` [v${p.version}]` : ""
@@ -725,13 +727,13 @@ export default function register(api: any) {
 
   api.registerTool({
     name: "awn_status",
-    description: "Get this agent's AWN identity, transport mode, known peers, and joined worlds.",
+    description: "Get this agent's AWN identity, transport mode, known agents, and joined worlds.",
     parameters: { type: "object", properties: {}, required: [] },
     async execute(_id: string, _params: Record<string, never>) {
       if (!identity) {
         return { content: [{ type: "text", text: "AWN service not started." }] }
       }
-      const peers = listPeers()
+      const agents = listAgents()
       const activeTransport = _transportManager?.active
       const lines = [
         ...((_agentMeta.name) ? [`Agent name: ${_agentMeta.name}`] : []),
@@ -740,7 +742,7 @@ export default function register(api: any) {
         `Active transport: ${activeTransport?.id ?? "http-only"}`,
         ...(_quicTransport?.isActive() ? [`QUIC endpoint: ${_quicTransport.address}`] : []),
         `Plugin version: v${_agentMeta.version}`,
-        `Known peers: ${peers.length}`,
+        `Known agents: ${agents.length}`,
         `Worlds joined: ${_joinedWorlds.size}`,
       ]
       for (const [id, info] of _joinedWorlds) {
@@ -776,7 +778,7 @@ export default function register(api: any) {
                 capabilities: [`world:${w.worldId}`],
                 lastSeen: w.lastSeen ?? Date.now(),
               })
-              upsertDiscoveredPeer(w.agentId, "", {
+              upsertDiscoveredAgent(w.agentId, "", {
                 alias: w.name,
                 endpoints: w.endpoints ?? [],
                 capabilities: [`world:${w.worldId}`],
@@ -788,7 +790,7 @@ export default function register(api: any) {
       } catch { /* gateway unreachable */ }
 
       // Merge with local cache
-      const localWorlds = findPeersByCapability("world:")
+      const localWorlds = findAgentsByCapability("world:")
       const allWorlds = [...localWorlds]
       for (const rw of registryWorlds) {
         if (!allWorlds.some(w => w.agentId === rw.agentId)) {
@@ -840,7 +842,7 @@ export default function register(api: any) {
         targetAddr = parsedAddress.address
         targetPort = parsedAddress.port
 
-        const ping = await getPeerPingInfo(targetAddr, targetPort, 5_000)
+        const ping = await getAgentPingInfo(targetAddr, targetPort, 5_000)
         if (!ping.ok) {
           return { content: [{ type: "text", text: `World at ${params.address} is unreachable.` }], isError: true }
         }
@@ -853,7 +855,7 @@ export default function register(api: any) {
         worldAgentId = ping.data.agentId
         worldPublicKey = ping.data.publicKey
       } else {
-        const worlds = findPeersByCapability(`world:${params.world_id}`)
+        const worlds = findAgentsByCapability(`world:${params.world_id}`)
         if (!worlds.length) {
           return { content: [{ type: "text", text: `World '${params.world_id}' not found. Use address parameter to connect directly.` }] }
         }
@@ -861,19 +863,19 @@ export default function register(api: any) {
         if ((!world.endpoints?.length || !world.publicKey) && params.world_id) {
           const gatewayWorld = await fetchGatewayWorldRecord(params.world_id)
           if (gatewayWorld?.agentId) {
-            upsertDiscoveredPeer(gatewayWorld.agentId, gatewayWorld.publicKey ?? "", {
+            upsertDiscoveredAgent(gatewayWorld.agentId, gatewayWorld.publicKey ?? "", {
               alias: gatewayWorld.alias ?? world.alias,
               capabilities: world.capabilities,
               endpoints: gatewayWorld.endpoints ?? world.endpoints,
               source: "gateway",
             })
 
-            world = getPeer(gatewayWorld.agentId) ?? {
+            world = getAgent(gatewayWorld.agentId) ?? {
               ...world,
               agentId: gatewayWorld.agentId,
               alias: gatewayWorld.alias ?? world.alias,
               endpoints: gatewayWorld.endpoints ?? world.endpoints,
-              publicKey: gatewayWorld.publicKey ?? world.publicKey,
+              publicKey: gatewayWorld.publicKey ?? world.publicKey ?? "",
             }
           }
         }
@@ -883,7 +885,7 @@ export default function register(api: any) {
         targetAddr = world.endpoints[0].address
         targetPort = world.endpoints[0].port ?? peerPort
         worldAgentId = world.agentId
-        worldPublicKey = getPeer(worldAgentId)?.publicKey ?? world.publicKey ?? ""
+        worldPublicKey = getAgent(worldAgentId)?.publicKey ?? world.publicKey ?? ""
       }
 
       if (!worldPublicKey) {
@@ -919,7 +921,7 @@ export default function register(api: any) {
         ? (result.data.manifest as { name: string }).name
         : worldId
 
-      upsertDiscoveredPeer(worldAgentId!, worldPublicKey, {
+      upsertDiscoveredAgent(worldAgentId!, worldPublicKey, {
         alias: worldName,
         capabilities: [`world:${worldId}`],
         endpoints: [{ transport: "tcp", address: targetAddr, port: targetPort, priority: 1, ttl: 3600 }],

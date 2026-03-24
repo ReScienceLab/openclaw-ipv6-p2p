@@ -13,13 +13,13 @@ import { PROTOCOL_VERSION } from "./version.js";
 import { buildSignedAgentCard } from "./card.js";
 import type { AgentCardOpts } from "./card.js";
 import type { Identity, KeyRotationRequest } from "./types.js";
-import type { PeerDb as PeerDbType } from "./peer-db.js";
+import type { AgentDb as AgentDbType } from "./agent-db.js";
 
 export type { AgentCardOpts };
 
-export interface PeerProtocolOpts {
+export interface AgentProtocolOpts {
   identity: Identity;
-  peerDb: PeerDbType;
+  agentDb: AgentDbType;
   /** Extra fields to include in /peer/ping response (evaluated on every request) */
   pingExtra?: Record<string, unknown> | (() => Record<string, unknown>);
   /** Called when a non-peer-protocol message arrives. Return reply body or null to skip. */
@@ -36,15 +36,15 @@ export interface PeerProtocolOpts {
 /**
  * Register AWN peer protocol routes on a Fastify instance:
  *   GET  /peer/ping
- *   GET  /peer/peers
+ *   GET  /peer/agents
  *   POST /peer/announce
  *   POST /peer/message
  */
-export function registerPeerRoutes(
+export function registerAgentRoutes(
   fastify: FastifyInstance,
-  opts: PeerProtocolOpts
+  opts: AgentProtocolOpts
 ): void {
-  const { identity, peerDb, pingExtra, onMessage, card } = opts;
+  const { identity, agentDb, pingExtra, onMessage, card } = opts;
 
   // Custom JSON parser that preserves the raw body string for digest verification.
   // The raw bytes are stored on req.rawBody so verifyHttpRequestHeaders can check
@@ -103,7 +103,7 @@ export function registerPeerRoutes(
   }));
 
   fastify.get("/peer/peers", async () => ({
-    peers: peerDb.getPeersForExchange(),
+    agents: agentDb.getAgentsForExchange(),
   }));
 
   fastify.post("/peer/announce", async (req, reply) => {
@@ -148,12 +148,12 @@ export function registerPeerRoutes(
         .code(400)
         .send({ error: "agentId does not match publicKey" });
     }
-    peerDb.upsert(ann.from as string, ann.publicKey as string, {
+    agentDb.upsert(ann.from as string, ann.publicKey as string, {
       alias: ann.alias as string,
       endpoints: ann.endpoints as [],
       capabilities: ann.capabilities as [],
     });
-    return { peers: peerDb.getPeersForExchange() };
+    return { agents: agentDb.getAgentsForExchange() };
   });
 
   fastify.post("/peer/message", async (req, reply) => {
@@ -195,7 +195,7 @@ export function registerPeerRoutes(
 
     const agentId = msg.from as string;
     // TOFU: verify agentId ↔ publicKey binding
-    const known = peerDb.get(agentId);
+    const known = agentDb.get(agentId);
     if (known?.publicKey) {
       if (known.publicKey !== msg.publicKey) {
         return reply.code(403).send({
@@ -210,7 +210,7 @@ export function registerPeerRoutes(
       }
     }
 
-    peerDb.upsert(agentId, msg.publicKey as string, {});
+    agentDb.upsert(agentId, msg.publicKey as string, {});
 
     let content: unknown;
     try {
@@ -322,7 +322,7 @@ export function registerPeerRoutes(
       return reply.code(403).send({ error: "Invalid signatureByNewKey" });
     }
 
-    const known = peerDb.get(agentId);
+    const known = agentDb.get(agentId);
     if (known?.publicKey && known.publicKey !== oldPublicKeyB64) {
       return reply.code(403).send({
         error:
@@ -330,7 +330,7 @@ export function registerPeerRoutes(
       });
     }
 
-    peerDb.upsert(agentId, newPublicKeyB64, {});
+    agentDb.upsert(agentId, newPublicKeyB64, {});
     return { ok: true };
   });
 }

@@ -22,8 +22,8 @@ const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
 
 const nacl = (await import("tweetnacl")).default
 
-const { startPeerServer, stopPeerServer, addWorldMembers } = await import("../dist/peer-server.js")
-const { initDb, flushDb } = await import("../dist/peer-db.js")
+const { startAgentServer, stopAgentServer, addWorldMembers } = await import("../dist/agent-server.js")
+const { initDb, flushDb } = await import("../dist/agent-db.js")
 const {
   agentIdFromPublicKey,
   signMessage,
@@ -33,7 +33,7 @@ const {
   verifyHttpResponseHeaders,
   computeContentDigest,
 } = await import("../dist/identity.js")
-const { sendP2PMessage } = await import("../dist/peer-client.js")
+const { sendP2PMessage } = await import("../dist/agent-client.js")
 
 const PORT = 18115
 
@@ -63,12 +63,12 @@ describe("request signing", () => {
     senderKey = makeIdentity()
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "awn-reqsign-"))
     initDb(dataDir)
-    await startPeerServer(PORT, { identity: selfKey, testMode: true })
+    await startAgentServer(PORT, { identity: selfKey, testMode: true })
     addWorldMembers("test-world", [senderKey.agentId])
   })
 
   after(async () => {
-    await stopPeerServer()
+    await stopAgentServer()
     flushDb()
     fs.rmSync(dataDir, { recursive: true, force: true })
   })

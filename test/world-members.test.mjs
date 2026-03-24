@@ -164,7 +164,7 @@ describe("World-scoped member discovery", () => {
     )
 
     assert.equal(
-      announceResp.peers.some((peer) => peer.agentId === announcedAgentId),
+      announceResp.agents.some((peer) => peer.agentId === announcedAgentId),
       true
     )
 

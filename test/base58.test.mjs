@@ -1,7 +1,7 @@
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 import { base58Encode, deriveDidKey, toPublicKeyMultibase } from "../packages/agent-world-sdk/dist/identity.js"
-import { base58Decode } from "../packages/agent-world-sdk/dist/peer-protocol.js"
+import { base58Decode } from "../packages/agent-world-sdk/dist/agent-protocol.js"
 
 const encodeCases = [
   { bytes: [0], encoded: "1" },

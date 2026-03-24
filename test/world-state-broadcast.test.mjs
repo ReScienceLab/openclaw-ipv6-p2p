@@ -144,9 +144,9 @@ describe("World state broadcast delivery", () => {
   it("creates a known non-member broadcast fixture via peer announce", async () => {
     const { agentId, announceResp } = await createKnownNonMemberFixture()
 
-    assert.equal(Array.isArray(announceResp.peers), true)
+    assert.equal(Array.isArray(announceResp.agents), true)
     assert.equal(
-      announceResp.peers.some(
+      announceResp.agents.some(
         (peer) =>
           peer.agentId === agentId &&
           peer.endpoints.some((ep) => ep.port === 29003)
@@ -177,9 +177,9 @@ describe("World state broadcast delivery", () => {
 
     const { agentId, announceResp } = await createKnownNonMemberFixture()
 
-    assert.equal(Array.isArray(announceResp.peers), true)
+    assert.equal(Array.isArray(announceResp.agents), true)
     assert.equal(
-      announceResp.peers.some((peer) => peer.agentId === agentId),
+      announceResp.agents.some((peer) => peer.agentId === agentId),
       true
     )
 

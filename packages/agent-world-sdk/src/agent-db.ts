@@ -1,10 +1,10 @@
-import type { PeerRecord } from "./types.js"
+import type { AgentRecord } from "./types.js"
 
 const DEFAULT_MAX_PEERS = 200
 const DEFAULT_STALE_TTL_MS = 30 * 60 * 1000
 
-export class PeerDb {
-  private peers = new Map<string, PeerRecord>()
+export class AgentDb {
+  private agents = new Map<string, AgentRecord>()
   private maxPeers: number
   private staleTtlMs: number
 
@@ -16,15 +16,15 @@ export class PeerDb {
   upsert(
     agentId: string,
     publicKey: string,
-    opts: Partial<Omit<PeerRecord, "agentId" | "publicKey">> & { lastSeen?: number } = {}
+    opts: Partial<Omit<AgentRecord, "agentId" | "publicKey">> & { lastSeen?: number } = {}
   ): void {
     const now = Date.now()
-    const existing = this.peers.get(agentId)
+    const existing = this.agents.get(agentId)
     const lastSeen = opts.lastSeen != null
       ? Math.max(existing?.lastSeen ?? 0, opts.lastSeen)
       : now
 
-    this.peers.set(agentId, {
+    this.agents.set(agentId, {
       agentId,
       publicKey: publicKey || existing?.publicKey || "",
       alias: opts.alias ?? existing?.alias ?? "",
@@ -33,31 +33,31 @@ export class PeerDb {
       lastSeen,
     })
 
-    if (this.peers.size > this.maxPeers) {
-      const oldest = [...this.peers.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0]
-      this.peers.delete(oldest.agentId)
+    if (this.agents.size > this.maxPeers) {
+      const oldest = [...this.agents.values()].sort((a, b) => a.lastSeen - b.lastSeen)[0]
+      this.agents.delete(oldest.agentId)
     }
   }
 
-  get(agentId: string): PeerRecord | undefined {
-    return this.peers.get(agentId)
+  get(agentId: string): AgentRecord | undefined {
+    return this.agents.get(agentId)
   }
 
   has(agentId: string): boolean {
-    return this.peers.has(agentId)
+    return this.agents.has(agentId)
   }
 
   prune(ttl = this.staleTtlMs): number {
     const cutoff = Date.now() - ttl
     let count = 0
-    for (const [id, p] of this.peers) {
-      if (p.lastSeen < cutoff) { this.peers.delete(id); count++ }
+    for (const [id, p] of this.agents) {
+      if (p.lastSeen < cutoff) { this.agents.delete(id); count++ }
     }
     return count
   }
 
-  getPeersForExchange(limit = 50): PeerRecord[] {
-    return [...this.peers.values()]
+  getAgentsForExchange(limit = 50): AgentRecord[] {
+    return [...this.agents.values()]
       .sort((a, b) => b.lastSeen - a.lastSeen)
       .slice(0, limit)
       .map(({ agentId, publicKey, alias, endpoints, capabilities, lastSeen }) => ({
@@ -68,22 +68,22 @@ export class PeerDb {
       }))
   }
 
-  findByCapability(cap: string): PeerRecord[] {
+  findByCapability(cap: string): AgentRecord[] {
     const isPrefix = cap.endsWith(":")
-    return [...this.peers.values()]
+    return [...this.agents.values()]
       .filter((p) => p.capabilities?.some((c) => isPrefix ? c.startsWith(cap) : c === cap))
       .sort((a, b) => b.lastSeen - a.lastSeen)
   }
 
   get size(): number {
-    return this.peers.size
+    return this.agents.size
   }
 
-  values(): IterableIterator<PeerRecord> {
-    return this.peers.values()
+  values(): IterableIterator<AgentRecord> {
+    return this.agents.values()
   }
 
   delete(agentId: string): void {
-    this.peers.delete(agentId)
+    this.agents.delete(agentId)
   }
 }

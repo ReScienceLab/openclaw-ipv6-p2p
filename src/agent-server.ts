@@ -15,7 +15,7 @@ import { agentIdFromPublicKey, verifyHttpRequestHeaders, signHttpResponse as sig
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pkgVersion: string = require("../package.json").version
 const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
-import { tofuVerifyAndCache, tofuReplaceKey, getPeersForExchange, upsertDiscoveredPeer, removePeer, getPeer } from "./peer-db"
+import { tofuVerifyAndCache, tofuReplaceKey, getAgentsForExchange, upsertDiscoveredAgent, removeAgent, getAgent } from "./agent-db"
 
 const MAX_MESSAGE_AGE_MS = 5 * 60 * 1000 // 5 minutes
 
@@ -67,7 +67,7 @@ interface SelfMeta {
 }
 let _selfMeta: SelfMeta = {}
 
-export interface PeerServerOptions {
+export interface AgentServerOptions {
   /** If true, disables startup delays for tests */
   testMode?: boolean
   /** Identity for response signing (optional) */
@@ -95,7 +95,7 @@ function canonical(msg: P2PMessage): Record<string, unknown> {
   }
 }
 
-export async function startPeerServer(port: number = 8099, opts?: PeerServerOptions): Promise<void> {
+export async function startAgentServer(port: number = 8099, opts?: AgentServerOptions): Promise<void> {
   if (opts?.identity) {
     _identity = opts.identity
   }
@@ -159,8 +159,8 @@ export async function startPeerServer(port: number = 8099, opts?: PeerServerOpti
 
     const agentId: string = raw.from
 
-    const knownPeer = getPeer(agentId)
-    if (!knownPeer?.publicKey && agentIdFromPublicKey(raw.publicKey) !== agentId) {
+    const knownAgent = getAgent(agentId)
+    if (!knownAgent?.publicKey && agentIdFromPublicKey(raw.publicKey) !== agentId) {
       return reply.code(400).send({ error: "agentId does not match publicKey" })
     }
 
@@ -189,8 +189,8 @@ export async function startPeerServer(port: number = 8099, opts?: PeerServerOpti
     }
 
     if (msg.event === "leave") {
-      removePeer(agentId)
-      console.log(`[p2p] <- leave  from=${agentId} — removed from peer table`)
+      removeAgent(agentId)
+      console.log(`[p2p] <- leave  from=${agentId} — removed from agent table`)
       return { ok: true }
     }
 
@@ -218,8 +218,8 @@ export async function startPeerServer(port: number = 8099, opts?: PeerServerOpti
 
     const agentId: string = rot.oldAgentId
 
-    // Only accept key rotation from known peers or co-members
-    if (!getPeer(agentId) && !isCoMember(agentId)) {
+    // Only accept key rotation from known agents or co-members
+    if (!getAgent(agentId) && !isCoMember(agentId)) {
       return reply.code(403).send({ error: "Unknown agent — key rotation requires existing relationship" })
     }
 
@@ -260,8 +260,8 @@ export async function startPeerServer(port: number = 8099, opts?: PeerServerOpti
     }
 
     // TOFU: clean rotation only — key-loss recovery requires manual re-pairing
-    const knownPeer = getPeer(agentId)
-    if (knownPeer?.publicKey && knownPeer.publicKey !== oldPublicKeyB64) {
+    const knownAgent = getAgent(agentId)
+    if (knownAgent?.publicKey && knownAgent.publicKey !== oldPublicKeyB64) {
       return reply.code(403).send({ error: "TOFU binding mismatch — key-loss recovery requires manual re-pairing" })
     }
 
@@ -272,10 +272,10 @@ export async function startPeerServer(port: number = 8099, opts?: PeerServerOpti
   })
 
   await server.listen({ port, host: "::" })
-  console.log(`[p2p] Peer server listening on [::]:${port}`)
+  console.log(`[p2p] Agent server listening on [::]:${port}`)
 }
 
-export async function stopPeerServer(): Promise<void> {
+export async function stopAgentServer(): Promise<void> {
   if (server) {
     await server.close()
     server = null
@@ -299,8 +299,8 @@ export function handleUdpMessage(data: Buffer, from: string): boolean {
     return false
   }
 
-  const knownPeer = getPeer(raw.from)
-  if (!knownPeer?.publicKey && agentIdFromPublicKey(raw.publicKey) !== raw.from) {
+  const knownAgent = getAgent(raw.from)
+  if (!knownAgent?.publicKey && agentIdFromPublicKey(raw.publicKey) !== raw.from) {
     return false
   }
 
@@ -332,7 +332,7 @@ export function handleUdpMessage(data: Buffer, from: string): boolean {
   }
 
   if (msg.event === "leave") {
-    removePeer(raw.from)
+    removeAgent(raw.from)
     console.log(`[p2p] <- leave (UDP) from=${raw.from}`)
     return true
   }

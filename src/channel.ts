@@ -3,9 +3,9 @@
  * Account IDs are agentIds.
  */
 import { Identity } from "./types"
-import { sendP2PMessage, SendOptions } from "./peer-client"
-import { listPeers, getPeerIds, getPeer } from "./peer-db"
-import { onMessage } from "./peer-server"
+import { sendP2PMessage, SendOptions } from "./agent-client"
+import { listAgents, getAgentIds, getAgent } from "./agent-db"
+import { onMessage } from "./agent-server"
 
 export const CHANNEL_CONFIG_SCHEMA = {
   schema: {
@@ -51,14 +51,14 @@ export function buildChannel(identity: Identity, port: number, getSendOpts?: (id
     capabilities: { chatTypes: ["direct"] },
     configSchema: CHANNEL_CONFIG_SCHEMA,
     config: {
-      listAccountIds: (_cfg: unknown) => getPeerIds(),
+      listAccountIds: (_cfg: unknown) => getAgentIds(),
       resolveAccount: (_cfg: unknown, accountId: string | undefined) => {
         const id = accountId ?? ""
-        const peer = getPeer(id)
+        const agent = getAgent(id)
         return {
           accountId: id,
-          agentId: peer?.agentId ?? id,
-          alias: peer?.alias ?? id,
+          agentId: agent?.agentId ?? id,
+          alias: agent?.alias ?? id,
         }
       },
     },

@@ -23,8 +23,8 @@ export const EndpointSchema = {
   },
 }
 
-export const PeerRecordSchema = {
-  $id: "PeerRecord",
+export const AgentRecordSchema = {
+  $id: "AgentRecord",
   type: "object",
   required: ["agentId", "publicKey", "alias", "endpoints", "capabilities", "lastSeen"],
   properties: {
@@ -110,7 +110,7 @@ export const SignedMessageSchema = {
 export const allSchemas = [
   ErrorSchema,
   EndpointSchema,
-  PeerRecordSchema,
+  AgentRecordSchema,
   WorldSummarySchema,
   WorldDetailSchema,
   AnnounceRequestSchema,

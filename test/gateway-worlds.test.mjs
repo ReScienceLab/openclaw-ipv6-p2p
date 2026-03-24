@@ -84,7 +84,7 @@ describe("Gateway GET /worlds", () => {
     const schemas = Object.keys(spec.components?.schemas ?? {}).sort()
     assert.ok(schemas.includes("WorldSummary"), "must include WorldSummary schema")
     assert.ok(schemas.includes("Endpoint"), "must include Endpoint schema")
-    assert.ok(schemas.includes("PeerRecord"), "must include PeerRecord schema")
+    assert.ok(schemas.includes("AgentRecord"), "must include AgentRecord schema")
 
     for (const [route, schemaName] of [
       ["/agents", "AnnounceRequest"],

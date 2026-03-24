@@ -33,7 +33,7 @@ test("startGatewayAnnounce defaults to the local gateway HTTP port", async () =>
     return {
       ok: true,
       async json() {
-        return { peers: [] }
+        return { agents: [] }
       },
     }
   }
@@ -54,7 +54,7 @@ test("startGatewayAnnounce defaults to the local gateway HTTP port", async () =>
       publicAddr: null,
       publicPort: 8099,
       capabilities: ["world"],
-      peerDb: {
+      agentDb: {
         size: 0,
         upsert() {},
       },

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test"
 import assert from "node:assert/strict"
 
-describe("v2 PeerAnnouncement format", () => {
+describe("v2 AgentAnnouncement format", () => {
   it("announcement has from (agentId) and endpoints with port/ttl", () => {
     const announcement = {
       from: "abcdef1234567890",
@@ -14,11 +14,11 @@ describe("v2 PeerAnnouncement format", () => {
         { transport: "quic", address: "1.2.3.4", port: 8098, priority: 10, ttl: 3600 },
         { transport: "tcp", address: "10.0.0.1", port: 8099, priority: 1, ttl: 86400 },
       ],
-      peers: [
+      agents: [
         {
           agentId: "1234567890abcdef",
           publicKey: "pk2",
-          alias: "peer2",
+          alias: "agent2",
           lastSeen: Date.now(),
           endpoints: [{ transport: "quic", address: "5.6.7.8", port: 8098, priority: 10, ttl: 3600 }],
         },
@@ -29,7 +29,7 @@ describe("v2 PeerAnnouncement format", () => {
     assert.equal(announcement.endpoints.length, 2)
     assert.equal(announcement.endpoints[0].port, 8098)
     assert.equal(announcement.endpoints[0].ttl, 3600)
-    assert.equal(announcement.peers[0].agentId, "1234567890abcdef")
+    assert.equal(announcement.agents[0].agentId, "1234567890abcdef")
   })
 
   it("P2PMessage uses from (agentId), no fromYgg", () => {

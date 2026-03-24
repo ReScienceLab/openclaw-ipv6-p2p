@@ -11,8 +11,8 @@ const require = createRequire(import.meta.url)
 const pkgVersion = require("../package.json").version
 const PROTOCOL_VERSION = pkgVersion.split(".").slice(0, 2).join(".")
 
-const { startPeerServer, stopPeerServer, addWorldMembers } = await import("../dist/peer-server.js")
-const { initDb, getPeer } = await import("../dist/peer-db.js")
+const { startAgentServer, stopAgentServer, addWorldMembers } = await import("../dist/agent-server.js")
+const { initDb, getAgent } = await import("../dist/agent-db.js")
 const { agentIdFromPublicKey, signWithDomainSeparator, DOMAIN_SEPARATORS, signHttpRequest, canonicalize } = await import("../dist/identity.js")
 
 function makeKeypair() {
@@ -98,11 +98,11 @@ describe("key rotation endpoint", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "awn-kr-test-"))
     initDb(tmpDir)
     port = 18099
-    await startPeerServer(port, { testMode: true })
+    await startAgentServer(port, { testMode: true })
   })
 
   after(async () => {
-    await stopPeerServer()
+    await stopAgentServer()
     fs.rmSync(tmpDir, { recursive: true })
   })
 
@@ -257,7 +257,7 @@ describe("key rotation endpoint", () => {
       ),
     })
     assert.equal(validSeedResp.status, 200)
-    assert.equal(getPeer(oldKey.agentId)?.publicKey, oldKey.publicKey)
+    assert.equal(getAgent(oldKey.agentId)?.publicKey, oldKey.publicKey)
 
     const signable = {
       agentId: oldKey.agentId,
@@ -297,7 +297,7 @@ describe("key rotation endpoint", () => {
     assert.deepEqual(await resp.json(), {
       error: "newAgentId does not match newPublicKey",
     })
-    assert.equal(getPeer(oldKey.agentId)?.publicKey, oldKey.publicKey)
+    assert.equal(getAgent(oldKey.agentId)?.publicKey, oldKey.publicKey)
   })
 
   test("rejects wrong type/version", async () => {

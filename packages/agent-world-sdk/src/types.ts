@@ -6,7 +6,7 @@ export interface Endpoint {
   ttl?: number
 }
 
-export interface PeerRecord {
+export interface AgentRecord {
   agentId: string
   publicKey: string
   alias: string

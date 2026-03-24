@@ -22,7 +22,7 @@ describe("canonicalize", () => {
 
   it("sorts keys inside arrays of objects", () => {
     const input = {
-      peers: [
+      agents: [
         { agentId: "aabbcc01", publicKey: "pk1", lastSeen: 100 },
         { lastSeen: 200, agentId: "aabbcc02", publicKey: "pk2" },
       ],
@@ -41,8 +41,8 @@ describe("canonicalize", () => {
   });
 
   it("produces identical serialization regardless of key insertion order", () => {
-    const a = { from: "aabbcc01", publicKey: "pk", timestamp: 1, peers: [{ agentId: "x", lastSeen: 1 }] };
-    const b = { peers: [{ lastSeen: 1, agentId: "x" }], timestamp: 1, publicKey: "pk", from: "aabbcc01" };
+    const a = { from: "aabbcc01", publicKey: "pk", timestamp: 1, agents: [{ agentId: "x", lastSeen: 1 }] };
+    const b = { agents: [{ lastSeen: 1, agentId: "x" }], timestamp: 1, publicKey: "pk", from: "aabbcc01" };
     assert.equal(
       JSON.stringify(canonicalize(a)),
       JSON.stringify(canonicalize(b))
@@ -63,12 +63,12 @@ describe("signMessage + verifySignature with nested data", () => {
     assert.equal(verifySignature(pubB64, data, sig), true);
   });
 
-  it("verifies signature on object with nested peers array", () => {
+  it("verifies signature on object with nested agents array", () => {
     const data = {
       from: "aabbcc01",
       publicKey: pubB64,
       timestamp: Date.now(),
-      peers: [
+      agents: [
         { agentId: "aabbcc02", publicKey: "pk2", lastSeen: 100 },
         { agentId: "aabbcc03", publicKey: "pk3", lastSeen: 200 },
       ],
@@ -82,13 +82,13 @@ describe("signMessage + verifySignature with nested data", () => {
       from: "aabbcc01",
       publicKey: pubB64,
       timestamp: 999,
-      peers: [{ agentId: "aabbcc02", publicKey: "pk2", lastSeen: 100 }],
+      agents: [{ agentId: "aabbcc02", publicKey: "pk2", lastSeen: 100 }],
     };
     const sig = signMessage(privB64, dataSign);
 
     // Verify with different key insertion order
     const dataVerify = {
-      peers: [{ lastSeen: 100, agentId: "aabbcc02", publicKey: "pk2" }],
+      agents: [{ lastSeen: 100, agentId: "aabbcc02", publicKey: "pk2" }],
       timestamp: 999,
       publicKey: pubB64,
       from: "aabbcc01",
@@ -101,13 +101,13 @@ describe("signMessage + verifySignature with nested data", () => {
       from: "aabbcc01",
       publicKey: pubB64,
       timestamp: 999,
-      peers: [{ agentId: "aabbcc02", publicKey: "pk2", lastSeen: 100 }],
+      agents: [{ agentId: "aabbcc02", publicKey: "pk2", lastSeen: 100 }],
     };
     const sig = signMessage(privB64, data);
 
     const tampered = {
       ...data,
-      peers: [{ agentId: "evil0000", publicKey: "pk2", lastSeen: 100 }],
+      agents: [{ agentId: "evil0000", publicKey: "pk2", lastSeen: 100 }],
     };
     assert.equal(verifySignature(pubB64, tampered, sig), false);
   });

@@ -95,7 +95,7 @@ export interface SendOptions {
   expectedPublicKey?: string
 }
 
-export async function getPeerPingInfo(
+export async function getAgentPingInfo(
   targetAddr: string,
   port: number = 8099,
   timeoutMs: number = 5_000,
@@ -204,12 +204,12 @@ export async function broadcastLeave(
   console.log(`[p2p] Leave broadcast sent to ${reachable.length} peer(s)`)
 }
 
-export async function pingPeer(
+export async function pingAgent(
   targetAddr: string,
   port: number = 8099,
   timeoutMs: number = 5_000,
   endpoints?: Endpoint[],
 ): Promise<boolean> {
-  const result = await getPeerPingInfo(targetAddr, port, timeoutMs, endpoints)
+  const result = await getAgentPingInfo(targetAddr, port, timeoutMs, endpoints)
   return result.ok
 }

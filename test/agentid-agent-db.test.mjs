@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import * as fs from "fs"
 import * as path from "path"
 import * as os from "os"
-import { initDb, upsertPeer, upsertDiscoveredPeer, listPeers, getPeer, removePeer, flushDb, tofuVerifyAndCache, tofuReplaceKey, setTofuTtl, getPeerIds, pruneStale, getEndpointAddress, findPeersByCapability } from "../dist/peer-db.js"
+import { initDb, upsertAgent, upsertDiscoveredAgent, listAgents, getAgent, removeAgent, flushDb, tofuVerifyAndCache, tofuReplaceKey, setTofuTtl, getAgentIds, pruneStale, getEndpointAddress, findAgentsByCapability } from "../dist/agent-db.js"
 import { generateIdentity } from "../dist/identity.js"
 
 let tmpDir
@@ -19,38 +19,38 @@ afterEach(() => {
 })
 
 describe("peer-db (agentId-keyed)", () => {
-  it("upsertDiscoveredPeer stores by agentId", () => {
+  it("upsertDiscoveredAgent stores by agentId", () => {
     const id = generateIdentity()
-    upsertDiscoveredPeer(id.agentId, id.publicKey, { source: "gateway" })
-    const peer = getPeer(id.agentId)
+    upsertDiscoveredAgent(id.agentId, id.publicKey, { source: "gateway" })
+    const peer = getAgent(id.agentId)
     assert.ok(peer)
     assert.equal(peer.agentId, id.agentId)
     assert.equal(peer.publicKey, id.publicKey)
   })
 
-  it("getPeerIds returns agentIds", () => {
+  it("getAgentIds returns agentIds", () => {
     const id1 = generateIdentity()
     const id2 = generateIdentity()
-    upsertDiscoveredPeer(id1.agentId, id1.publicKey, { source: "gateway" })
-    upsertDiscoveredPeer(id2.agentId, id2.publicKey, { source: "gossip" })
-    const ids = getPeerIds()
+    upsertDiscoveredAgent(id1.agentId, id1.publicKey, { source: "gateway" })
+    upsertDiscoveredAgent(id2.agentId, id2.publicKey, { source: "gossip" })
+    const ids = getAgentIds()
     assert.ok(ids.includes(id1.agentId))
     assert.ok(ids.includes(id2.agentId))
   })
 
-  it("upsertPeer works with agentId", () => {
-    upsertPeer("abcdef1234567890", "Alice")
-    const peer = getPeer("abcdef1234567890")
+  it("upsertAgent works with agentId", () => {
+    upsertAgent("abcdef1234567890", "Alice")
+    const peer = getAgent("abcdef1234567890")
     assert.ok(peer)
     assert.equal(peer.alias, "Alice")
   })
 
-  it("removePeer works with agentId", () => {
+  it("removeAgent works with agentId", () => {
     const id = generateIdentity()
-    upsertDiscoveredPeer(id.agentId, id.publicKey, {})
-    assert.ok(getPeer(id.agentId))
-    removePeer(id.agentId)
-    assert.equal(getPeer(id.agentId), null)
+    upsertDiscoveredAgent(id.agentId, id.publicKey, {})
+    assert.ok(getAgent(id.agentId))
+    removeAgent(id.agentId)
+    assert.equal(getAgent(id.agentId), null)
   })
 
   it("TOFU: tofuVerifyAndCache accepts first key", () => {
@@ -68,24 +68,24 @@ describe("peer-db (agentId-keyed)", () => {
   it("pruneStale removes old peers but protects manual", () => {
     const id1 = generateIdentity()
     const id2 = generateIdentity()
-    upsertDiscoveredPeer(id1.agentId, id1.publicKey, {
+    upsertDiscoveredAgent(id1.agentId, id1.publicKey, {
       source: "gossip",
       lastSeen: 1000,
     })
-    upsertPeer(id2.agentId, "Manual")
+    upsertAgent(id2.agentId, "Manual")
 
-    assert.equal(listPeers().length, 2)
+    assert.equal(listAgents().length, 2)
     const pruned = pruneStale(1000)
     assert.ok(pruned >= 1)
-    assert.equal(getPeer(id1.agentId), null)
-    assert.ok(getPeer(id2.agentId))
+    assert.equal(getAgent(id1.agentId), null)
+    assert.ok(getAgent(id2.agentId))
   })
 
   it("TOFU: tofuCachedAt is set on first cache", () => {
     const id = generateIdentity()
     const before = Date.now()
     tofuVerifyAndCache(id.agentId, id.publicKey)
-    const peer = getPeer(id.agentId)
+    const peer = getAgent(id.agentId)
     assert.ok(peer)
     assert.ok(typeof peer.tofuCachedAt === "number")
     assert.ok(peer.tofuCachedAt >= before)
@@ -102,12 +102,12 @@ describe("peer-db (agentId-keyed)", () => {
     assert.equal(tofuVerifyAndCache(id1.agentId, id1.publicKey), true)
 
     // Backdate tofuCachedAt to simulate expiry
-    const peer = getPeer(id1.agentId)
+    const peer = getAgent(id1.agentId)
     peer.tofuCachedAt = Date.now() - 100 // 100ms ago, well past 1ms TTL
 
     // A different key should now be accepted
     assert.equal(tofuVerifyAndCache(id1.agentId, id2.publicKey), true)
-    const updated = getPeer(id1.agentId)
+    const updated = getAgent(id1.agentId)
     assert.equal(updated.publicKey, id2.publicKey)
 
     // Restore default TTL
@@ -137,7 +137,7 @@ describe("peer-db (agentId-keyed)", () => {
     tofuVerifyAndCache(id1.agentId, id1.publicKey)
     tofuReplaceKey(id1.agentId, id2.publicKey)
 
-    const peer = getPeer(id1.agentId)
+    const peer = getAgent(id1.agentId)
     assert.equal(peer.publicKey, id2.publicKey)
     assert.ok(peer.tofuCachedAt)
 
@@ -148,7 +148,7 @@ describe("peer-db (agentId-keyed)", () => {
   it("tofuReplaceKey creates new record if peer not found", () => {
     const id = generateIdentity()
     tofuReplaceKey(id.agentId, id.publicKey)
-    const peer = getPeer(id.agentId)
+    const peer = getAgent(id.agentId)
     assert.ok(peer)
     assert.equal(peer.publicKey, id.publicKey)
     assert.ok(peer.tofuCachedAt)
@@ -156,24 +156,24 @@ describe("peer-db (agentId-keyed)", () => {
 
   it("getEndpointAddress returns best address for transport", () => {
     const id = generateIdentity()
-    upsertDiscoveredPeer(id.agentId, id.publicKey, {
+    upsertDiscoveredAgent(id.agentId, id.publicKey, {
       endpoints: [
         { transport: "tcp", address: "10.0.0.1", port: 8099, priority: 1, ttl: 86400 },
         { transport: "quic", address: "1.2.3.4", port: 8098, priority: 10, ttl: 3600 },
       ],
     })
-    const peer = getPeer(id.agentId)
+    const peer = getAgent(id.agentId)
     assert.equal(getEndpointAddress(peer, "tcp"), "10.0.0.1")
     assert.equal(getEndpointAddress(peer, "quic"), "1.2.3.4")
     assert.equal(getEndpointAddress(peer, "tailscale"), null)
   })
 })
 
-describe("findPeersByCapability", () => {
+describe("findAgentsByCapability", () => {
   it("exact match returns peer with that capability", () => {
     const id = generateIdentity()
-    upsertDiscoveredPeer(id.agentId, id.publicKey, { capabilities: ["world:pixel-city"] })
-    const results = findPeersByCapability("world:pixel-city")
+    upsertDiscoveredAgent(id.agentId, id.publicKey, { capabilities: ["world:pixel-city"] })
+    const results = findAgentsByCapability("world:pixel-city")
     assert.equal(results.length, 1)
     assert.equal(results[0].agentId, id.agentId)
   })
@@ -182,10 +182,10 @@ describe("findPeersByCapability", () => {
     const a = generateIdentity()
     const b = generateIdentity()
     const c = generateIdentity()
-    upsertDiscoveredPeer(a.agentId, a.publicKey, { capabilities: ["world:pixel-city"] })
-    upsertDiscoveredPeer(b.agentId, b.publicKey, { capabilities: ["world:dungeon"] })
-    upsertDiscoveredPeer(c.agentId, c.publicKey, { capabilities: ["chat"] })
-    const results = findPeersByCapability("world:")
+    upsertDiscoveredAgent(a.agentId, a.publicKey, { capabilities: ["world:pixel-city"] })
+    upsertDiscoveredAgent(b.agentId, b.publicKey, { capabilities: ["world:dungeon"] })
+    upsertDiscoveredAgent(c.agentId, c.publicKey, { capabilities: ["chat"] })
+    const results = findAgentsByCapability("world:")
     assert.equal(results.length, 2)
     assert.ok(results.some((p) => p.agentId === a.agentId))
     assert.ok(results.some((p) => p.agentId === b.agentId))
@@ -193,13 +193,13 @@ describe("findPeersByCapability", () => {
 
   it("returns empty array when no match", () => {
     const id = generateIdentity()
-    upsertDiscoveredPeer(id.agentId, id.publicKey, { capabilities: ["chat"] })
-    assert.deepEqual(findPeersByCapability("world:"), [])
+    upsertDiscoveredAgent(id.agentId, id.publicKey, { capabilities: ["chat"] })
+    assert.deepEqual(findAgentsByCapability("world:"), [])
   })
 
   it("peer with no capabilities is not matched", () => {
     const id = generateIdentity()
-    upsertDiscoveredPeer(id.agentId, id.publicKey, {})
-    assert.deepEqual(findPeersByCapability("world:"), [])
+    upsertDiscoveredAgent(id.agentId, id.publicKey, {})
+    assert.deepEqual(findAgentsByCapability("world:"), [])
   })
 })
