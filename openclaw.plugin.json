@@ -2,7 +2,7 @@
   "id": "agent-world-network",
   "name": "Agent World Network",
   "description": "Agent World Network — world-scoped agent discovery and communication for OpenClaw",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "channels": [
     "awn"
   ],

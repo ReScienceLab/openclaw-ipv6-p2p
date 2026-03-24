@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1
+
+### Patch Changes
+
+- 6994233: Auto-generate OpenAPI spec from route schemas using @fastify/swagger, serve Swagger UI at /docs
+- 29ce8c3: Smoother release process: workflow_dispatch trigger, concurrency control, ClawHub continue-on-error, auto-trigger CI on Version Packages PR, changeset package validation
+- 6994233: Include endpoints in /worlds gateway response and list_worlds discovery
+
 ## 1.3.0
 
 ### Minor Changes
