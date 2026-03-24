@@ -9,8 +9,27 @@ permissions:
   contents: write
 
 jobs:
+  resolve-tag:
+    name: Resolve release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Get tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            TAG=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName)
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: Build ${{ matrix.target }}
+    needs: resolve-tag
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,6 +47,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -69,9 +90,8 @@ jobs:
 
   upload:
     name: Upload to Release
-    needs: build
+    needs: [resolve-tag, build]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -82,19 +102,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG="${{ needs.resolve-tag.outputs.tag }}"
           for f in artifacts/*.tar.gz artifacts/*.deb; do
             [ -f "$f" ] || continue
-            echo "Uploading $f"
-            gh release upload "${{ github.event.release.tag_name }}" "$f" \
+            echo "Uploading $f to ${TAG}"
+            gh release upload "${TAG}" "$f" \
               --repo "${{ github.repository }}" \
               --clobber
           done
 
   homebrew:
     name: Update Homebrew formula
-    needs: upload
+    needs: [resolve-tag, upload]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
     steps:
       - uses: actions/checkout@v6
 
@@ -102,7 +122,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
+          TAG="${{ needs.resolve-tag.outputs.tag }}"
           VERSION="${TAG#v}"
           REPO="${{ github.repository }}"
           BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
@@ -160,10 +180,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG="${{ needs.resolve-tag.outputs.tag }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout main
           git add Formula/awn.rb
           git diff --cached --quiet && echo "No formula changes" && exit 0
-          git commit -m "chore(brew): update Homebrew formula to ${{ github.event.release.tag_name }}"
+          git commit -m "chore(brew): update Homebrew formula to ${TAG}"
           git push origin main

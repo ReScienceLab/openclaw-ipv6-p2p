@@ -65,6 +65,16 @@ jobs:
           gh pr reopen "$PR"
           echo "Reopened Version Packages PR #$PR to trigger CI"
 
+      # GITHUB_TOKEN-created releases don't trigger `release: [published]`
+      # events, so we explicitly dispatch the CLI build workflow.
+      - name: Trigger CLI release build
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run release-cli.yml --ref main
+          echo "Dispatched release-cli.yml workflow"
+
       - name: Publish to ClawHub
         if: steps.changesets.outputs.published == 'true'
         continue-on-error: true
