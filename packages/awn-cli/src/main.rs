@@ -79,9 +79,13 @@ enum DaemonAction {
         /// Gateway URL
         #[arg(long)]
         gateway_url: Option<String>,
-        /// Listen port for the agent server
+        /// Listen port for the peer server
         #[arg(long, default_value_t = 8099)]
         port: u16,
+        /// Public address to advertise in world.join (e.g. a VPN IP or hostname).
+        /// Defaults to 127.0.0.1 (local-only). Set this so world members can reach you.
+        #[arg(long)]
+        advertise_address: Option<String>,
     },
     /// Stop the AWN daemon
     Stop,
@@ -99,12 +103,13 @@ async fn main() {
                 data_dir,
                 gateway_url,
                 port,
+                advertise_address,
             } => {
                 let data_dir = data_dir.unwrap_or_else(daemon::default_data_dir);
                 let gateway_url = gateway_url.unwrap_or_else(daemon::default_gateway_url);
                 let ipc_port = cli_ipc_port.unwrap_or_else(|| daemon::ipc_port());
 
-                match daemon::start_daemon(data_dir.clone(), gateway_url, port, ipc_port).await {
+                match daemon::start_daemon(data_dir.clone(), gateway_url, port, ipc_port, advertise_address).await {
                     Ok(handle) => {
                         daemon::write_port_file(&data_dir, handle.addr.port());
                         daemon::write_pid_file(&data_dir);
@@ -113,11 +118,13 @@ async fn main() {
                                 "{}",
                                 serde_json::json!({
                                     "ok": true,
-                                    "ipc_addr": handle.addr.to_string()
+                                    "ipc_addr": handle.addr.to_string(),
+                                    "peer_addr": handle.peer_addr.to_string(),
                                 })
                             );
                         } else {
-                            eprintln!("AWN daemon listening on {}", handle.addr);
+                            eprintln!("AWN daemon IPC listening on {}", handle.addr);
+                            eprintln!("AWN peer server listening on {}", handle.peer_addr);
                             eprintln!("Press Ctrl+C to stop");
                         }
                         tokio::signal::ctrl_c().await.ok();

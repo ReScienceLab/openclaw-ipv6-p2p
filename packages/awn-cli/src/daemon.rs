@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 use crate::agent_db::{AgentDb, AgentRecord, Endpoint};
-use crate::crypto::{build_signed_p2p_message, sign_http_request};
+use crate::crypto::{
+    build_signed_p2p_message, sign_http_request, sign_http_response, verify_http_response,
+};
 use crate::identity::{self, Identity};
 
 const DEFAULT_IPC_PORT: u16 = 8199;
@@ -39,9 +41,12 @@ pub struct DaemonState {
     pub identity: Identity,
     pub agent_db: Arc<Mutex<AgentDb>>,
     pub joined_worlds: Arc<Mutex<HashMap<String, JoinedWorld>>>,
+    pub received_messages: Arc<Mutex<std::collections::VecDeque<serde_json::Value>>>,
     pub data_dir: PathBuf,
     pub gateway_url: String,
     pub listen_port: u16,
+    /// Address to advertise in world.join endpoint payload (e.g. a public IP or VPN address).
+    pub advertise_address: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -156,6 +161,7 @@ pub struct SendMessageBody {
 pub struct DaemonHandle {
     shutdown_tx: oneshot::Sender<()>,
     pub addr: SocketAddr,
+    pub peer_addr: SocketAddr,
 }
 
 impl DaemonHandle {
@@ -164,29 +170,42 @@ impl DaemonHandle {
     }
 }
 
+const MEMBER_REFRESH_SECS: u64 = 30;
+
 pub async fn start_daemon(
     data_dir: PathBuf,
     gateway_url: String,
     listen_port: u16,
     ipc_port: u16,
+    advertise_address: Option<String>,
 ) -> Result<DaemonHandle, DaemonError> {
     let identity = identity::load_or_create_identity(&data_dir, "identity")
         .map_err(|e| DaemonError::Identity(e.to_string()))?;
     let agent_db = AgentDb::open(&data_dir);
 
+    // Bind peer listener first so we know the actual port before building state.
+    let peer_bind = SocketAddr::from(([0, 0, 0, 0], listen_port));
+    let peer_listener = tokio::net::TcpListener::bind(peer_bind)
+        .await
+        .map_err(|e| DaemonError::Bind(format!("peer port {listen_port}: {e}")))?;
+    let bound_peer_addr = peer_listener.local_addr().unwrap();
+
     let state = DaemonState {
         identity,
         agent_db: Arc::new(Mutex::new(agent_db)),
         joined_worlds: Arc::new(Mutex::new(HashMap::new())),
+        received_messages: Arc::new(Mutex::new(std::collections::VecDeque::with_capacity(100))),
         data_dir,
         gateway_url,
-        listen_port,
+        listen_port: bound_peer_addr.port(), // actual bound port (may differ when 0 requested)
+        advertise_address,
     };
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let (ipc_shutdown_tx, ipc_shutdown_rx) = oneshot::channel::<()>();
 
-    let app = Router::new()
+    // ── IPC server (loopback) ───────────────────────────────────────────────
+    let ipc_app = Router::new()
         .route("/ipc/status", get(handle_status))
         .route("/ipc/agents", get(handle_agents))
         .route("/ipc/worlds", get(handle_worlds))
@@ -197,6 +216,7 @@ pub async fn start_daemon(
         .route("/ipc/leave/{world_id}", post(handle_leave_world))
         .route("/ipc/peer/ping/{agent_id}", get(handle_ping_agent))
         .route("/ipc/send", post(handle_send_message))
+        .route("/ipc/messages", get(handle_messages))
         .route(
             "/ipc/shutdown",
             post({
@@ -215,16 +235,34 @@ pub async fn start_daemon(
                 }
             }),
         )
-        .with_state(state);
+        .with_state(state.clone());
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], ipc_port));
-    let listener = tokio::net::TcpListener::bind(addr)
+    let ipc_addr = SocketAddr::from(([127, 0, 0, 1], ipc_port));
+    let ipc_listener = tokio::net::TcpListener::bind(ipc_addr)
         .await
         .map_err(|e| DaemonError::Bind(e.to_string()))?;
-    let bound_addr = listener.local_addr().unwrap();
+    let bound_ipc_addr = ipc_listener.local_addr().unwrap();
+
+    // ── Peer server (all interfaces) ────────────────────────────────────────
+    let peer_app = Router::new()
+        .route("/peer/ping", get(handle_peer_ping))
+        .route("/peer/message", post(handle_peer_message))
+        .with_state(state.clone());
+
+    // ── Background: member refresh every 30 s ───────────────────────────────
+    let refresh_state = state.clone();
+    tokio::spawn(async move {
+        let mut ticker =
+            tokio::time::interval(std::time::Duration::from_secs(MEMBER_REFRESH_SECS));
+        ticker.tick().await; // skip first immediate tick
+        loop {
+            ticker.tick().await;
+            do_refresh_world_members(&refresh_state).await;
+        }
+    });
 
     tokio::spawn(async move {
-        axum::serve(listener, app)
+        axum::serve(ipc_listener, ipc_app)
             .with_graceful_shutdown(async {
                 tokio::select! {
                     _ = shutdown_rx => {}
@@ -235,9 +273,14 @@ pub async fn start_daemon(
             .ok();
     });
 
+    tokio::spawn(async move {
+        axum::serve(peer_listener, peer_app).await.ok();
+    });
+
     Ok(DaemonHandle {
         shutdown_tx,
-        addr: bound_addr,
+        addr: bound_ipc_addr,
+        peer_addr: bound_peer_addr,
     })
 }
 
@@ -432,6 +475,127 @@ async fn handle_ping() -> Json<OkResponse> {
     })
 }
 
+// ── Peer server handlers ────────────────────────────────────────────────────
+
+async fn handle_peer_ping(State(state): State<DaemonState>) -> axum::response::Response {
+    let body = serde_json::json!({
+        "ok": true,
+        "agentId": state.identity.agent_id,
+        "publicKey": state.identity.pub_b64,
+    })
+    .to_string();
+    let h = sign_http_response(&state.identity, 200, &body);
+    axum::response::Response::builder()
+        .status(200)
+        .header("Content-Type", "application/json")
+        .header("X-AgentWorld-Version", h.version)
+        .header("X-AgentWorld-From", h.from_agent)
+        .header("X-AgentWorld-KeyId", h.key_id)
+        .header("X-AgentWorld-Timestamp", h.timestamp)
+        .header("Content-Digest", h.content_digest)
+        .header("X-AgentWorld-Signature", h.signature)
+        .body(axum::body::Body::from(body))
+        .unwrap()
+}
+
+async fn handle_peer_message(
+    State(state): State<DaemonState>,
+    body: String,
+) -> axum::response::Response {
+    if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&body) {
+        if msg.get("from").is_some() && msg.get("event").is_some() && msg.get("signature").is_some() {
+            let mut msgs = state.received_messages.lock().unwrap();
+            if msgs.len() >= 100 {
+                msgs.pop_front();
+            }
+            msgs.push_back(msg);
+        }
+    }
+    let resp_body = serde_json::json!({"ok": true}).to_string();
+    let h = sign_http_response(&state.identity, 200, &resp_body);
+    axum::response::Response::builder()
+        .status(200)
+        .header("Content-Type", "application/json")
+        .header("X-AgentWorld-Version", h.version)
+        .header("X-AgentWorld-From", h.from_agent)
+        .header("X-AgentWorld-KeyId", h.key_id)
+        .header("X-AgentWorld-Timestamp", h.timestamp)
+        .header("Content-Digest", h.content_digest)
+        .header("X-AgentWorld-Signature", h.signature)
+        .body(axum::body::Body::from(resp_body))
+        .unwrap()
+}
+
+// ── IPC: received messages ──────────────────────────────────────────────────
+
+async fn handle_messages(State(state): State<DaemonState>) -> Json<serde_json::Value> {
+    let msgs: Vec<_> = state.received_messages.lock().unwrap().iter().cloned().collect();
+    Json(serde_json::json!({ "messages": msgs }))
+}
+
+// ── Background: member refresh ──────────────────────────────────────────────
+
+async fn do_refresh_world_members(state: &DaemonState) {
+    let worlds: Vec<JoinedWorld> =
+        state.joined_worlds.lock().unwrap().values().cloned().collect();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
+
+    for world in worlds {
+        let is_ipv6 = world.address.contains(':') && !world.address.contains('.');
+        let host = if is_ipv6 {
+            format!("[{}]:{}", world.address, world.port)
+        } else {
+            format!("{}:{}", world.address, world.port)
+        };
+        let url = format!("http://{}/world/members", host);
+        let hdrs = sign_http_request(&state.identity, "GET", &host, "/world/members", "");
+
+        let result = client
+            .get(&url)
+            .header("X-AgentWorld-Version", &hdrs.version)
+            .header("X-AgentWorld-From", &hdrs.from_agent)
+            .header("X-AgentWorld-KeyId", &hdrs.key_id)
+            .header("X-AgentWorld-Timestamp", &hdrs.timestamp)
+            .header("Content-Digest", &hdrs.content_digest)
+            .header("X-AgentWorld-Signature", &hdrs.signature)
+            .send()
+            .await;
+
+        match result {
+            Ok(r) if r.status().as_u16() == 403 || r.status().as_u16() == 404 => {
+                state.joined_worlds.lock().unwrap().remove(&world.world_id);
+            }
+            Ok(r) if r.status().is_success() => {
+                if let Ok(data) = r.json::<serde_json::Value>().await {
+                    if let Some(members) = data.get("members").and_then(|m| m.as_array()) {
+                        let mut db = state.agent_db.lock().unwrap();
+                        for member in members {
+                            let Some(aid) = member.get("agentId").and_then(|v| v.as_str()) else {
+                                continue;
+                            };
+                            if aid == state.identity.agent_id {
+                                continue;
+                            }
+                            let alias = member.get("alias").and_then(|v| v.as_str());
+                            let endpoints: Vec<Endpoint> = member
+                                .get("endpoints")
+                                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                                .unwrap_or_default();
+                            db.upsert(aid, "", alias, Some(endpoints), None, Some("gossip"), None);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// ── IPC: joined worlds ──────────────────────────────────────────────────────
+
 async fn handle_joined_worlds(State(state): State<DaemonState>) -> Json<JoinedWorldsResponse> {
     let worlds = state
         .joined_worlds
@@ -458,8 +622,24 @@ async fn handle_join_world(
             .await
             .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    // Build join P2P message (content is a JSON string of join params)
-    let content = serde_json::json!({ "endpoints": [], "alias": "" }).to_string();
+    // Build join P2P message — include our peer endpoint so the world server
+    // can reach us for broadcasts and member refreshes.
+    let advertise_addr = state
+        .advertise_address
+        .as_deref()
+        .unwrap_or("127.0.0.1")
+        .to_string();
+    let content = serde_json::json!({
+        "endpoints": [{
+            "transport": "tcp",
+            "address": advertise_addr,
+            "port": state.listen_port,
+            "priority": 1,
+            "ttl": 3600
+        }],
+        "alias": ""
+    })
+    .to_string();
     let msg = build_signed_p2p_message(&state.identity, "world.join", &content);
 
     // Send to world server
@@ -674,13 +854,42 @@ async fn handle_ping_agent(
         };
         let url = format!("http://{}/peer/ping", host);
         let start = std::time::Instant::now();
-        if client.get(&url).send().await.map_or(false, |r| r.status().is_success()) {
-            return Json(PingResponse {
-                ok: true,
-                latency_ms: Some(start.elapsed().as_millis() as u64),
-                error: None,
-            });
+        let Ok(resp) = client.get(&url).send().await else { continue };
+        if !resp.status().is_success() {
+            continue;
         }
+        let latency = start.elapsed().as_millis() as u64;
+
+        // Verify signed response when we have the agent's public key.
+        let pub_key = {
+            let db = state.agent_db.lock().unwrap();
+            db.get(&agent_id).map(|r| r.public_key.clone()).unwrap_or_default()
+        };
+        if !pub_key.is_empty() {
+            // Extract headers before consuming the response body
+            let hdr = |name: &str| -> String {
+                resp.headers()
+                    .get(name)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let ver = hdr("x-agentworld-version");
+            let sig = hdr("x-agentworld-signature");
+            let from = hdr("x-agentworld-from");
+            let kid  = hdr("x-agentworld-keyid");
+            let ts   = hdr("x-agentworld-timestamp");
+            let cd   = hdr("content-digest");
+            if !ver.is_empty() && !sig.is_empty() {
+                if let Ok(body_text) = resp.text().await {
+                    if !verify_http_response(&ver, &from, &kid, &ts, &cd, &sig, 200, &body_text, &pub_key) {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        return Json(PingResponse { ok: true, latency_ms: Some(latency), error: None });
     }
 
     Json(PingResponse {
@@ -743,12 +952,24 @@ async fn handle_send_message(
             .send()
             .await;
 
-        if resp.map_or(false, |r| r.status().is_success()) {
-            return Ok(Json(OkResponse {
-                ok: true,
-                message: Some(format!("Message sent to {}", body.agent_id)),
-            }));
+        let Ok(resp) = resp else { continue };
+        if !resp.status().is_success() {
+            continue;
         }
+        // Verify that the responder is who we addressed; skip endpoint if not.
+        let from_hdr = resp
+            .headers()
+            .get("x-agentworld-from")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        if !from_hdr.is_empty() && from_hdr != body.agent_id {
+            continue;
+        }
+        return Ok(Json(OkResponse {
+            ok: true,
+            message: Some(format!("Message sent to {}", body.agent_id)),
+        }));
     }
 
     Err(StatusCode::BAD_GATEWAY)
@@ -916,8 +1137,9 @@ mod tests {
         let handle = start_daemon(
             tmp.path().to_path_buf(),
             "http://localhost:9999".to_string(),
-            8099,
-            0, // OS-assigned port
+            0,
+            0,
+            None, // OS-assigned port
         )
         .await
         .unwrap();
@@ -935,8 +1157,9 @@ mod tests {
         let handle = start_daemon(
             tmp.path().to_path_buf(),
             "http://localhost:9999".to_string(),
-            8099,
             0,
+            0,
+            None,
         )
         .await
         .unwrap();
@@ -945,7 +1168,7 @@ mod tests {
         let resp: StatusResponse = reqwest::get(&url).await.unwrap().json().await.unwrap();
         assert!(resp.agent_id.starts_with("aw:sha256:"));
         assert_eq!(resp.version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(resp.listen_port, 8099);
+        assert_eq!(resp.listen_port, handle.peer_addr.port());
 
         handle.shutdown();
     }
@@ -956,8 +1179,9 @@ mod tests {
         let handle = start_daemon(
             tmp.path().to_path_buf(),
             "http://localhost:9999".to_string(),
-            8099,
             0,
+            0,
+            None,
         )
         .await
         .unwrap();
@@ -975,8 +1199,9 @@ mod tests {
         let handle = start_daemon(
             tmp.path().to_path_buf(),
             "http://localhost:9999".to_string(),
-            8099,
             0,
+            0,
+            None,
         )
         .await
         .unwrap();
@@ -992,8 +1217,9 @@ mod tests {
         let handle1 = start_daemon(
             tmp.path().to_path_buf(),
             "http://localhost:9999".to_string(),
-            8099,
             0,
+            0,
+            None,
         )
         .await
         .unwrap();
@@ -1005,8 +1231,9 @@ mod tests {
         let handle2 = start_daemon(
             tmp.path().to_path_buf(),
             "http://localhost:9999".to_string(),
-            8099,
             0,
+            0,
+            None,
         )
         .await
         .unwrap();
