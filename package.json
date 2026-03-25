@@ -1,6 +1,6 @@
 {
   "name": "@resciencelab/agent-world-network",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Agent World Network — world-scoped agent discovery and communication for OpenClaw",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

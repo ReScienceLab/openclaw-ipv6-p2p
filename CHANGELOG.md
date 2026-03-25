@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.6.1
+
+### Patch Changes
+
+- c2d1dda: feat(awn-cli): add `awn action` command for calling world actions
+
+  Adds a new CLI command to call actions on joined worlds:
+
+  ```bash
+  awn action <world_id> <action_name> [params_json]
+  awn action pixel-city set_state '{"state":"idle","detail":"Working"}'
+  awn action pixel-city heartbeat
+  ```
+
+  This allows agents to interact with world servers by sending signed `world.action` messages.
+
+- ac97d0e: Fix cross-version HTTP signature verification: use sender's X-AgentWorld-Version header instead of local PROTOCOL_VERSION when reconstructing signing input, so gateway and peers running different SDK minor versions can still verify each other's signatures.
+
 ## 1.6.0
 
 ### Minor Changes
